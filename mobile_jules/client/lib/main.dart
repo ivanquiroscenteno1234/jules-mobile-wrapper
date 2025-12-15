@@ -8,7 +8,8 @@ import 'home_screen.dart';
 const String SERVER_URL = 'http://10.0.2.2:8000';
 
 void main() {
-  // Triggering a new build to test Google Drive upload
+  // Triggering a new build to test Google Drive upload with secrets
+  print('Starting Mobile Jules...');
   runApp(const MyApp());
 }
 
