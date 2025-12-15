@@ -1,0 +1,9 @@
+INFO:     Started server process [3049]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+WARNING: No GOOGLE_API_KEY found. Using MockJulesClient.
+INFO:     127.0.0.1:45216 - "GET /repos HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38336 - "WebSocket /chat/sources/github/user/repo-a" [accepted]
+INFO:     connection open
+INFO:     connection closed
