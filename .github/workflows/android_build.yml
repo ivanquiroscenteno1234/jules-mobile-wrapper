@@ -26,19 +26,31 @@ jobs:
         with:
           channel: 'stable'
 
+      - name: Create Temporary Build Project
+        run: |
+          # Create a clean flutter project
+          flutter create temp_build
+
+          # Remove default code
+          rm -rf temp_build/lib temp_build/pubspec.yaml
+
+          # Copy user code
+          cp -r mobile_jules/client/lib temp_build/
+          cp mobile_jules/client/pubspec.yaml temp_build/
+
       - name: Install Dependencies
-        working-directory: ./mobile_jules/client
+        working-directory: ./temp_build
         run: flutter pub get
 
       - name: Build APK
-        working-directory: ./mobile_jules/client
+        working-directory: ./temp_build
         run: flutter build apk --release
 
       - name: Upload to Google Drive
         uses: adityak74/google-drive-upload-git-action@main
         with:
           credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: mobile_jules/client/build/app/outputs/flutter-apk/app-release.apk
+          filename: temp_build/build/app/outputs/flutter-apk/app-release.apk
           folderId: "1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO"
           name: mobile_jules_${{ github.run_number }}.apk
           overwrite: "false"
