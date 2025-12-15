@@ -3,8 +3,7 @@ name: Build and Upload Android APK
 on:
   push:
     branches:
-      - main
-      - master
+      - '**' # Trigger on all branches for testing
   workflow_dispatch:
 
 jobs:
@@ -27,31 +26,19 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Create Flutter Project Structure
-        run: |
-          # Create a new blank flutter project
-          flutter create mobile_jules_client
-
-          # Remove the default lib and pubspec
-          rm -rf mobile_jules_client/lib mobile_jules_client/pubspec.yaml
-
-          # Copy our source files into the new project
-          cp -r mobile_jules/client/lib mobile_jules_client/
-          cp mobile_jules/client/pubspec.yaml mobile_jules_client/
-
       - name: Install Dependencies
-        working-directory: ./mobile_jules_client
+        working-directory: ./mobile_jules/client
         run: flutter pub get
 
       - name: Build APK
-        working-directory: ./mobile_jules_client
+        working-directory: ./mobile_jules/client
         run: flutter build apk --release
 
       - name: Upload to Google Drive
         uses: adityak74/google-drive-upload-git-action@main
         with:
           credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: mobile_jules_client/build/app/outputs/flutter-apk/app-release.apk
+          filename: mobile_jules/client/build/app/outputs/flutter-apk/app-release.apk
           folderId: "1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO"
           name: mobile_jules_${{ github.run_number }}.apk
           overwrite: "false"
