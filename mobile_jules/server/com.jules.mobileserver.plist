@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jules.mobileserver</string>
+
+    <!-- COMMAND TO RUN -->
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Path to Python. Run 'which python3' in terminal to find yours. -->
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+
+    <!-- WORKING DIRECTORY (CRITICAL: EDIT THIS PATH) -->
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/path/to/jules-mobile-wrapper/mobile_jules/server</string>
+
+    <!-- ENVIRONMENT VARIABLES -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>GOOGLE_API_KEY</key>
+        <string>your_actual_jules_api_key</string>
+        <key>PYTHONPATH</key>
+        <string>..</string>
+    </dict>
+
+    <!-- LOGGING -->
+    <key>StandardOutPath</key>
+    <string>/tmp/jules_server.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/jules_server.err</string>
+
+    <!-- SETTINGS -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>

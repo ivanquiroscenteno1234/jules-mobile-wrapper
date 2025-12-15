@@ -6,28 +6,16 @@ This guide explains how to set up the Mobile Jules server to run automatically i
 
 The best way to run a Python script as a service on Windows is using **Task Scheduler**.
 
-### Step 1: Create a Startup Script
+### Step 1: Configure the Startup Script
 
 1.  Navigate to the `mobile_jules/server` folder.
-2.  Create a new file named `start_server.bat`.
-3.  Edit it with Notepad and paste the following (adjust paths to match your actual setup):
-
-    ```batch
-    @echo off
-    :: Navigate to the directory
-    cd /d "C:\Users\YOUR_USERNAME\path\to\jules-mobile-wrapper\mobile_jules\server"
-
-    :: Set the API Key (Replace with your actual key)
-    set GOOGLE_API_KEY=your_actual_jules_api_key
-
-    :: Add parent directory to PYTHONPATH
-    set PYTHONPATH=%PYTHONPATH%;..
-
-    :: Run the server
-    :: If you use a virtual environment, point to the python.exe in venv\Scripts\python.exe
-    python -m uvicorn main:app --host 0.0.0.0 --port 8000
-    ```
-4.  Save the file. **Test it** by double-clicking it to make sure the server starts.
+2.  Find the file **`start_server.bat`**.
+3.  Right-click it and select **Edit** (using Notepad or any text editor).
+4.  Update the lines under `:: CONFIGURATION SECTION`:
+    *   `set GOOGLE_API_KEY=...`: Paste your actual key.
+    *   `cd /d ...`: Paste the full path to the `mobile_jules/server` folder on your computer.
+5.  Save the file.
+6.  **Test it** by double-clicking it to make sure the server starts.
 
 ### Step 2: Schedule the Task
 
@@ -48,52 +36,18 @@ Now the server will start automatically!
 
 On macOS, we use `launchd` to create a background service.
 
-### Step 1: Create a Property List (.plist) file
+### Step 1: Configure the Property List (.plist) file
 
-1.  Open a text editor.
-2.  Paste the following content, modifying the paths:
-
-    ```xml
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-        <key>Label</key>
-        <string>com.jules.mobileserver</string>
-        <key>ProgramArguments</key>
-        <array>
-            <string>/usr/bin/python3</string> <!-- Path to your python executable -->
-            <string>-m</string>
-            <string>uvicorn</string>
-            <string>main:app</string>
-            <string>--host</string>
-            <string>0.0.0.0</string>
-            <string>--port</string>
-            <string>8000</string>
-        </array>
-        <key>WorkingDirectory</key>
-        <string>/Users/YOUR_USERNAME/path/to/jules-mobile-wrapper/mobile_jules/server</string>
-        <key>EnvironmentVariables</key>
-        <dict>
-            <key>GOOGLE_API_KEY</key>
-            <string>your_actual_jules_api_key</string>
-            <key>PYTHONPATH</key>
-            <string>..</string>
-        </dict>
-        <key>RunAtLoad</key>
-        <true/>
-        <key>KeepAlive</key>
-        <true/>
-        <key>StandardOutPath</key>
-        <string>/tmp/jules_server.out</string>
-        <key>StandardErrorPath</key>
-        <string>/tmp/jules_server.err</string>
-    </dict>
-    </plist>
+1.  Navigate to `mobile_jules/server` and find **`com.jules.mobileserver.plist`**.
+2.  Open it with a text editor.
+3.  Edit the values inside `<string>...</string>` tags:
+    *   **WorkingDirectory**: Set the full path to `mobile_jules/server`.
+    *   **GOOGLE_API_KEY**: Set your actual key.
+    *   **ProgramArguments** (Optional): If you installed Python via Homebrew/Conda, update `/usr/bin/python3` to your specific python path (run `which python3` in terminal to find it).
+4.  Copy the file to your LaunchAgents folder:
+    ```bash
+    cp mobile_jules/server/com.jules.mobileserver.plist ~/Library/LaunchAgents/
     ```
-
-3.  Save the file as `com.jules.mobileserver.plist` in `~/Library/LaunchAgents/`.
-    *   You can do this via terminal: `mv com.jules.mobileserver.plist ~/Library/LaunchAgents/`
 
 ### Step 2: Load the Service
 
@@ -111,30 +65,17 @@ The server will now start automatically when you log in.
 
 On Linux, we use `systemd`.
 
-### Step 1: Create a Service File
+### Step 1: Configure the Service File
 
-1.  Create a file named `jules-server.service`:
-
-    ```ini
-    [Unit]
-    Description=Mobile Jules Server
-    After=network.target
-
-    [Service]
-    User=YOUR_USERNAME
-    WorkingDirectory=/home/YOUR_USERNAME/path/to/jules-mobile-wrapper/mobile_jules/server
-    Environment="GOOGLE_API_KEY=your_actual_jules_api_key"
-    Environment="PYTHONPATH=.."
-    ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
-    Restart=always
-
-    [Install]
-    WantedBy=multi-user.target
-    ```
-
-2.  Move it to the system folder (requires sudo):
+1.  Navigate to `mobile_jules/server` and find **`jules-server.service`**.
+2.  Open it with a text editor.
+3.  Edit the `CONFIGURATION SECTION`:
+    *   **User**: Set to your Linux username.
+    *   **WorkingDirectory**: Set the full path to `mobile_jules/server`.
+    *   **GOOGLE_API_KEY**: Set your actual key.
+4.  Copy it to the system folder:
     ```bash
-    sudo mv jules-server.service /etc/systemd/system/
+    sudo cp mobile_jules/server/jules-server.service /etc/systemd/system/
     ```
 
 ### Step 2: Enable and Start
