@@ -1,65 +1,105 @@
-# Google Drive Upload Setup Guide
+# Google Drive Upload Setup (Bypassing Key Restrictions)
 
-This guide explains how to set up the Google Drive integration for your GitHub Actions workflow. This will allow the generated APK files to be automatically uploaded to your specified Google Drive folder.
+We have set up an automated system to build your Android App and upload it to your Google Drive folder whenever you push changes to GitHub.
+
+Because your Google Cloud account has a restriction that prevents creating "Service Account Keys" (`constraints/iam.disableServiceAccountKeyCreation`), we are using a more modern and secure method called **Workload Identity Federation**.
 
 ## Prerequisites
+1. You must have a Google Cloud Project.
+2. You must have the Google Drive folder created: `https://drive.google.com/drive/folders/1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO`
 
-You need a Google account and a GitHub account.
+## Step 1: Run the Setup Script in Google Cloud Shell
 
-## Step 1: Create a Google Cloud Project
+We have prepared a script that automatically configures everything for you.
 
-1.  Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2.  Click on the project selector dropdown (top left) and click **"New Project"**.
-3.  Give it a name (e.g., "Jules Mobile Builder") and click **"Create"**.
-4.  Make sure your new project is selected.
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Click the **Activate Cloud Shell** icon (a terminal prompt symbol >_) in the top right toolbar.
+3. Wait for the terminal to provision and connect.
+4. Copy and paste the following commands into the Cloud Shell terminal and press Enter:
 
-## Step 2: Enable Google Drive API
+```bash
+# Download the setup script directly from your repo (or create it)
+cat << 'EOF' > setup_wif.sh
+#!/bin/bash
+set -e
 
-1.  In the Google Cloud Console, open the main menu (hamburger icon) and go to **"APIs & Services" > "Library"**.
-2.  Search for **"Google Drive API"**.
-3.  Click on it and then click **"Enable"**.
+# Configuration
+REPO="ivanquiroscenteno1234/jules-mobile-wrapper"
+SERVICE_ACCOUNT_NAME="github-action-sa"
+POOL_NAME="github-pool"
+PROVIDER_NAME="github-provider"
 
-## Step 3: Create a Service Account
+echo "Setting up Workload Identity Federation for: $REPO"
+PROJECT_ID=$(gcloud config get-value project)
+echo "Project ID: $PROJECT_ID"
 
-1.  Go to **"APIs & Services" > "Credentials"**.
-2.  Click **"+ CREATE CREDENTIALS"** and select **"Service account"**.
-3.  Enter a name for the service account (e.g., "drive-uploader").
-4.  Click **"Create and Continue"**.
-5.  (Optional) For "Select a role", you can choose "Project > Editor" or leave it blank as we only need access to specific folders. Click **"Continue"**.
-6.  Click **"Done"**.
+# Enable APIs
+gcloud services enable iamcredentials.googleapis.com cloudresourcemanager.googleapis.com sts.googleapis.com drive.googleapis.com
 
-## Step 4: Generate Service Account Key
+# Create Service Account
+SA_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+if ! gcloud iam service-accounts describe "$SA_EMAIL" > /dev/null 2>&1; then
+    gcloud iam service-accounts create "$SERVICE_ACCOUNT_NAME" --display-name="GitHub Actions Service Account"
+fi
 
-1.  In the "Credentials" screen, look at the "Service Accounts" section.
-2.  Click on the email address of the service account you just created (e.g., `drive-uploader@...`).
-3.  Go to the **"Keys"** tab.
-4.  Click **"ADD KEY"** > **"Create new key"**.
-5.  Select **"JSON"** and click **"Create"**.
-6.  A JSON file will be downloaded to your computer. **Keep this file safe!** It contains the credentials.
+# Create Pool & Provider
+if ! gcloud iam workload-identity-pools describe "$POOL_NAME" --location="global" > /dev/null 2>&1; then
+    gcloud iam workload-identity-pools create "$POOL_NAME" --location="global" --display-name="GitHub Actions Pool"
+fi
+POOL_ID=$(gcloud iam workload-identity-pools describe "$POOL_NAME" --location="global" --format="value(name)")
 
-## Step 5: Share the Drive Folder
+if ! gcloud iam workload-identity-pools providers describe "$PROVIDER_NAME" --location="global" --workload-identity-pool="$POOL_NAME" > /dev/null 2>&1; then
+    gcloud iam workload-identity-pools providers create "$PROVIDER_NAME" --location="global" --workload-identity-pool="$POOL_NAME" \
+    --display-name="GitHub Actions Provider" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
+    --issuer-uri="https://token.actions.githubusercontent.com"
+fi
+PROVIDER_ID=$(gcloud iam workload-identity-pools providers describe "$PROVIDER_NAME" --location="global" --workload-identity-pool="$POOL_NAME" --format="value(name)")
 
-1.  Open the downloaded JSON key file and find the `"client_email"` field. Copy the email address inside it.
-2.  Go to your Google Drive folder: [Target Folder](https://drive.google.com/drive/folders/1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO).
-3.  Click the folder name at the top or right-click the folder and select **"Share"**.
-4.  Paste the service account email address you copied.
-5.  Make sure the permission is set to **"Editor"** so it can upload files.
-6.  Click **"Send"** (you can uncheck "Notify people" if you want).
+# Bind Repo
+gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+    --role="roles/iam.workloadIdentityUser" \
+    --member="principalSet://iam.googleapis.com/${POOL_ID}/attribute.repository/${REPO}" \
+    --no-user-output-enabled
 
-## Step 6: Add Secrets to GitHub
+echo ""
+echo "--------------------------------------------------------"
+echo "SETUP COMPLETE. PLEASE SAVE THESE VALUES:"
+echo "--------------------------------------------------------"
+echo "1. Service Account Email: $SA_EMAIL"
+echo "2. Provider ID:           $PROVIDER_ID"
+echo "--------------------------------------------------------"
+EOF
 
-1.  Go to your GitHub repository `jules-mobile-wrapper`.
-2.  Click on **"Settings"** (top tab).
-3.  In the left sidebar, click **"Secrets and variables"** > **"Actions"**.
-4.  Click **"New repository secret"**.
-    *   **Name**: `GDRIVE_CREDENTIALS`
-    *   **Secret**: Open your downloaded JSON key file with a text editor, copy the *entire* content, and paste it here.
-    *   Click **"Add secret"**.
+# Run the script
+bash setup_wif.sh
+```
 
-*Note: The folder ID `1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO` is already configured in the workflow file, so you don't need to add it as a secret.*
+## Step 2: Share the Google Drive Folder
 
-## Done!
+1. Copy the **Service Account Email** output by the script (e.g., `github-action-sa@your-project.iam.gserviceaccount.com`).
+2. Go to your [Google Drive Folder](https://drive.google.com/drive/folders/1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO).
+3. Click the dropdown arrow next to the folder name > **Share**.
+4. Paste the email address into the "Add people and groups" field.
+5. Ensure the permission is set to **Editor**.
+6. Uncheck "Notify people" (optional, as it's a robot).
+7. Click **Send** (or Share).
 
-Now, every time you push code to the `main` or `master` branch, the GitHub Action will:
-1.  Build the Flutter APK.
-2.  Upload the APK file to your Google Drive folder.
+## Step 3: Add GitHub Secrets
+
+1. Go to your GitHub Repository: `https://github.com/ivanquiroscenteno1234/jules-mobile-wrapper`
+2. Navigate to **Settings** > **Secrets and variables** > **Actions**.
+3. Click **New repository secret**.
+4. Add the first secret:
+   *   **Name:** `GCP_SERVICE_ACCOUNT`
+   *   **Value:** (Paste the Service Account Email from Step 1)
+5. Click **Add secret**.
+6. Click **New repository secret** again.
+7. Add the second secret:
+   *   **Name:** `GCP_WORKLOAD_IDENTITY_PROVIDER`
+   *   **Value:** (Paste the Provider ID from Step 1, it looks like `projects/123.../locations/global/workloadIdentityPools/...`)
+8. Click **Add secret**.
+
+## Step 4: Verify
+
+Once these secrets are added, the next time you push code to `main`, the "Build and Upload" action will run automatically.
