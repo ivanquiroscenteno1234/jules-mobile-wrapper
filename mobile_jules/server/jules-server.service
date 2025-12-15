@@ -1,0 +1,30 @@
+[Unit]
+Description=Mobile Jules Server
+After=network.target
+
+[Service]
+# ==========================================
+# CONFIGURATION SECTION - EDIT THIS!
+# ==========================================
+
+# 1. User running the script
+User=YOUR_USERNAME
+
+# 2. Path to the 'mobile_jules/server' folder
+WorkingDirectory=/home/YOUR_USERNAME/path/to/jules-mobile-wrapper/mobile_jules/server
+
+# 3. Environment Variables
+Environment="GOOGLE_API_KEY=your_actual_jules_api_key"
+Environment="PYTHONPATH=.."
+
+# 4. Command to run (verify path to python3 with 'which python3')
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+# ==========================================
+# END CONFIGURATION
+# ==========================================
+
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
