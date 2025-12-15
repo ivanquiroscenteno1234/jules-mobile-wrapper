@@ -55,11 +55,8 @@ You need a Google account and a GitHub account.
     *   **Name**: `GDRIVE_CREDENTIALS`
     *   **Secret**: Open your downloaded JSON key file with a text editor, copy the *entire* content, and paste it here.
     *   Click **"Add secret"**.
-5.  Click **"New repository secret"** again.
-    *   **Name**: `GDRIVE_FOLDER_ID`
-    *   **Secret**: `1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO`
-        *   (This is the ID from your folder URL: `.../folders/1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO`)
-    *   Click **"Add secret"**.
+
+*Note: The folder ID `1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO` is already configured in the workflow file, so you don't need to add it as a secret.*
 
 ## Done!
 

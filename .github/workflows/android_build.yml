@@ -52,6 +52,6 @@ jobs:
         with:
           credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
           filename: mobile_jules_client/build/app/outputs/flutter-apk/app-release.apk
-          folderId: ${{ secrets.GDRIVE_FOLDER_ID }}
+          folderId: "1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO"
           name: mobile_jules_${{ github.run_number }}.apk
           overwrite: "false"
