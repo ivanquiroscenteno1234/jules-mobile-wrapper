@@ -11,10 +11,19 @@ jobs:
   build:
     name: Build APK and Upload to Drive
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup Java
         uses: actions/setup-java@v3
@@ -47,11 +56,9 @@ jobs:
         working-directory: ./mobile_jules_client
         run: flutter build apk --release
 
+      - name: Install Python Dependencies
+        run: |
+          pip install google-api-python-client google-auth
+
       - name: Upload to Google Drive
-        uses: adityak74/google-drive-upload-git-action@main
-        with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: mobile_jules_client/build/app/outputs/flutter-apk/app-release.apk
-          folderId: "1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO"
-          name: mobile_jules_${{ github.run_number }}.apk
-          overwrite: "false"
+        run: python scripts/upload_to_drive.py
