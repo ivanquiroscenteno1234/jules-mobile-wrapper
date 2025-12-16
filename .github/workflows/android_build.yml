@@ -46,10 +46,21 @@ jobs:
         working-directory: ./temp_build
         run: flutter build apk --release
 
+      - name: Encode Credentials
+        id: encode_creds
+        shell: bash
+        env:
+          RAW_CREDS: ${{ secrets.GDRIVE_CREDENTIALS }}
+        run: |
+          # The upload action expects Base64 encoded credentials.
+          # We encode the raw JSON secret here to avoid forcing the user to do it manually.
+          ENCODED=$(echo "$RAW_CREDS" | base64 -w 0)
+          echo "b64_creds=$ENCODED" >> $GITHUB_OUTPUT
+
       - name: Upload to Google Drive
         uses: adityak74/google-drive-upload-git-action@main
         with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
+          credentials: ${{ steps.encode_creds.outputs.b64_creds }}
           filename: temp_build/build/app/outputs/flutter-apk/app-release.apk
           folderId: "1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO"
           name: mobile_jules_${{ github.run_number }}.apk
