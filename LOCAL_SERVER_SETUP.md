@@ -8,6 +8,16 @@ The best way to run a Python script as a service on Windows is using **Task Sche
 
 ### Step 1: Configure the Startup Script
 
+ 1.  Open Command Prompt / Terminal.
+ 2.  Navigate to the `mobile_jules/server` folder.
+ 3.  Install dependencies:
+     ```bash
+     pip install -r requirements.txt
+     ```
+ 4.  (Optional) If you have an Ngrok account, run: `ngrok config add-authtoken YOUR_TOKEN`. This prevents the tunnel from expiring quickly.
+
+### Step 2: Configure the Startup Script
+
 1.  Navigate to the `mobile_jules/server` folder.
 2.  Find the file **`start_server.bat`**.
 3.  Right-click it and select **Edit** (using Notepad or any text editor).

@@ -136,4 +136,21 @@ def parse_activity(activity: Dict) -> str:
     return f"Jules: [Activity: {activity.get('name')}]"
 
 if __name__ == "__main__":
+    # Attempt to start ngrok for easier mobile testing
+    try:
+        from pyngrok import ngrok
+
+        # Open a HTTP tunnel on the default port 8000
+        # <NgrokTunnel: "http://<public_sub>.ngrok.io" -> "http://localhost:8000">
+        http_tunnel = ngrok.connect(8000)
+        public_url = http_tunnel.public_url
+        print("\n" + "="*60)
+        print(f"NGROK TUNNEL STARTED: {public_url}")
+        print("Use this URL in your Mobile App Settings!")
+        print("="*60 + "\n")
+    except ImportError:
+        print("Warning: 'pyngrok' not installed. Skipping auto-tunnel.")
+    except Exception as e:
+        print(f"Warning: Could not start ngrok: {e}")
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
