@@ -6,7 +6,7 @@
 :: ==========================================
 
 :: 1. Your Google/Jules API Key
-set GOOGLE_API_KEY=your_actual_jules_api_key
+set GOOGLE_API_KEY="AQ.Ab8RN6KKEiLic-GInn3szRXG_fyX881-pHm10Mpk_cueHsVA0Q"
 
 :: 2. The full path to your 'mobile_jules/server' folder
 :: Example: C:\Users\Alice\Documents\jules-mobile-wrapper\mobile_jules\server
