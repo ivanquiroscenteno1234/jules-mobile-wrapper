@@ -18,8 +18,25 @@ def upload_file():
     client_secret = os.environ.get("GDRIVE_CLIENT_SECRET")
     refresh_token = os.environ.get("GDRIVE_REFRESH_TOKEN")
 
-    if not all([client_id, client_secret, refresh_token]):
-        print("Error: Missing one or more required secrets (GDRIVE_CLIENT_ID, GDRIVE_CLIENT_SECRET, GDRIVE_REFRESH_TOKEN).")
+    missing_secrets = []
+    if not client_id:
+        missing_secrets.append("GDRIVE_CLIENT_ID")
+    if not client_secret:
+        missing_secrets.append("GDRIVE_CLIENT_SECRET")
+    if not refresh_token:
+        missing_secrets.append("GDRIVE_REFRESH_TOKEN")
+
+    if missing_secrets:
+        print("!! ERROR: Missing required GitHub Secrets !!")
+        print(f"The following environment variables were not found: {', '.join(missing_secrets)}")
+        print("\nPossible causes:")
+        print("1. You haven't added the secrets to the GitHub repository yet.")
+        print("2. You added them as 'Variables' instead of 'Secrets'.")
+        print("3. There is a typo in the secret name.")
+        print("\nTo fix this:")
+        print("1. Go to your GitHub Repo -> Settings -> Secrets and variables -> Actions.")
+        print("2. Click 'New repository secret'.")
+        print("3. Add the missing secrets exactly as named above.")
         sys.exit(1)
 
     # Create Credentials object manually using the refresh token

@@ -28,8 +28,8 @@ jobs:
 
       - name: Create Temporary Build Project
         run: |
-          # Create a clean flutter project
-          flutter create temp_build
+          # Create a clean flutter project with a specific organization to avoid default com.example
+          flutter create --org com.jules temp_build
 
           # Remove default code
           rm -rf temp_build/lib temp_build/pubspec.yaml
@@ -37,6 +37,10 @@ jobs:
           # Copy user code
           cp -r mobile_jules/client/lib temp_build/
           cp mobile_jules/client/pubspec.yaml temp_build/
+
+          # Inject INTERNET permission into AndroidManifest.xml
+          # We search for the <manifest> tag and insert the permission right after it
+          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>|' temp_build/android/app/src/main/AndroidManifest.xml
 
       - name: Install Dependencies
         working-directory: ./temp_build
