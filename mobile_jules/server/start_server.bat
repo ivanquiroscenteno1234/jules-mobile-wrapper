@@ -6,18 +6,31 @@
 :: ==========================================
 
 :: 1. Your Google/Jules API Key
-set GOOGLE_API_KEY=your_actual_jules_api_key
-
-:: 2. The full path to your 'mobile_jules/server' folder
-:: Example: C:\Users\Alice\Documents\jules-mobile-wrapper\mobile_jules\server
-cd /d "C:\PATH\TO\YOUR\jules-mobile-wrapper\mobile_jules\server"
+:: Replace the text below with your actual key (starts with AIza...)
+set GOOGLE_API_KEY=YOUR_KEY_HERE
 
 :: ==========================================
 :: END CONFIGURATION
 :: ==========================================
 
+:: Automatically navigate to the folder containing this script
+cd /d "%~dp0"
+
 echo Starting Mobile Jules Server...
-set PYTHONPATH=%PYTHONPATH%;..
+
+:: Check for API Key
+if "%GOOGLE_API_KEY%"=="YOUR_KEY_HERE" (
+    echo.
+    echo [ERROR] You have not set your Google API Key yet!
+    echo 1. Right-click 'start_server.bat' and select 'Edit'.
+    echo 2. Replace 'YOUR_KEY_HERE' with your actual key.
+    echo.
+    pause
+    exit /b
+)
+
+:: Add parent directory to python path
+set PYTHONPATH=%PYTHONPATH%;..\..
 
 :: Check if python is available
 python --version >nul 2>&1
@@ -27,5 +40,6 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+:: Run the python script directly (this ensures the Ngrok logic in main.py runs)
+python main.py
 pause
