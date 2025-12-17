@@ -12,3 +12,4 @@ __pycache__/
 *credentials*
 *service_account*
 project-*.json
+set_env.bat

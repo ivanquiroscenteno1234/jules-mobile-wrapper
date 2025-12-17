@@ -1,0 +1,5 @@
+@echo off
+:: Local environment configuration - DO NOT COMMIT THIS FILE!
+:: Copy this to set_env.bat and add your real API key
+
+set GOOGLE_API_KEY=YOUR_API_KEY_HERE
