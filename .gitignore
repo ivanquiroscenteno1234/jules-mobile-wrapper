@@ -1,2 +1,14 @@
 __pycache__/
 *.pyc
+
+# Credentials and secrets
+*.json
+!package.json
+!package-lock.json
+*.pem
+*.key
+.env
+.env.*
+*credentials*
+*service_account*
+project-*.json

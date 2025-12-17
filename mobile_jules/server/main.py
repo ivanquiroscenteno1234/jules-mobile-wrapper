@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Import the Client
-from mobile_jules.server.jules_client import JulesClient, MockJulesClient
+from jules_client import JulesClient, MockJulesClient
 
 app = FastAPI()
 
