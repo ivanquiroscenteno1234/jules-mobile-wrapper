@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'main.dart'; // To access SERVER_URL
+import 'config.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,7 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> fetchRepos() async {
     try {
-      final response = await http.get(Uri.parse('$SERVER_URL/repos'));
+      final response = await http.get(Uri.parse('${AppConfig.serverUrl}/repos'));
 
       if (response.statusCode == 200) {
         setState(() {
@@ -52,6 +52,10 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Mobile Jules'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showSettingsDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -97,6 +101,48 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   },
                 ),
+    );
+  }
+
+  void _showSettingsDialog() {
+    final TextEditingController urlController = TextEditingController(text: AppConfig.serverUrl);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Server Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter the URL of your python server (e.g. from ngrok):'),
+            TextField(
+              controller: urlController,
+              decoration: const InputDecoration(hintText: 'http://...'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                AppConfig.serverUrl = urlController.text.trim();
+                // Remove trailing slash if present
+                if (AppConfig.serverUrl.endsWith('/')) {
+                  AppConfig.serverUrl = AppConfig.serverUrl.substring(0, AppConfig.serverUrl.length - 1);
+                }
+                isLoading = true;
+                error = null;
+              });
+              Navigator.pop(context);
+              fetchRepos();
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
     );
   }
 }
