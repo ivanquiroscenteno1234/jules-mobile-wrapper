@@ -1,105 +1,119 @@
-# Google Drive Upload Setup (Bypassing Key Restrictions)
+# Google Drive Upload Setup (OAuth 2.0 Method)
 
-We have set up an automated system to build your Android App and upload it to your Google Drive folder whenever you push changes to GitHub.
-
-Because your Google Cloud account has a restriction that prevents creating "Service Account Keys" (`constraints/iam.disableServiceAccountKeyCreation`), we are using a more modern and secure method called **Workload Identity Federation**.
+We are switching to **OAuth 2.0** because standard Service Accounts have a "Storage Quota" of 0 bytes, which prevents them from uploading files to personal Google Drive folders. By using OAuth, the script will act **as you**, using your own storage quota.
 
 ## Prerequisites
 1. You must have a Google Cloud Project.
 2. You must have the Google Drive folder created: `https://drive.google.com/drive/folders/1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO`
 
-## Step 1: Run the Setup Script in Google Cloud Shell
+## Step 1: Create OAuth Credentials
 
-We have prepared a script that automatically configures everything for you.
+1. Go to **[APIs & Services > OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)**.
+2. Select **External** and click **Create**.
+3. Fill in required fields:
+   *   **App name:** "GitHub Actions Upload"
+   *   **User support email:** (Your email)
+   *   **Developer contact information:** (Your email)
+   *   Click **Save and Continue**.
+4. **Scopes:** Click **Add or Remove Scopes**.
+   *   Search for `drive.file` and select it (`.../auth/drive.file`).
+   *   Click **Update**, then **Save and Continue**.
+5. **Test Users:** Add your own email address. Click **Save and Continue**.
+6. **Publish App:**
+   *   Back on the dashboard, click **PUBLISH APP** (under "Publishing Status").
+   *   Confirm by clicking **Confirm**.
+   *   *Note: This prevents the token from expiring in 7 days. You will see a warning later because the app isn't verified, which is fine for personal use.*
 
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Click the **Activate Cloud Shell** icon (a terminal prompt symbol >_) in the top right toolbar.
-3. Wait for the terminal to provision and connect.
-4. Copy and paste the following commands into the Cloud Shell terminal and press Enter:
+## Step 2: Create Client ID
+
+1. Go to **[APIs & Services > Credentials](https://console.cloud.google.com/apis/credentials)**.
+2. Click **+ CREATE CREDENTIALS** > **OAuth client ID**.
+3. **Application type:** Select **Desktop app**.
+4. **Name:** "GitHub Actions".
+5. Click **Create**.
+6. A popup will appear. **Copy** the **Client ID** and **Client Secret**. Save them specifically.
+
+## Step 3: Generate Refresh Token
+
+You need to authorize the app once to get a "Refresh Token" that allows GitHub Actions to access your Drive forever.
+
+1. Open **[Google Cloud Shell](https://console.cloud.google.com/)** (terminal icon in top right).
+2. Paste the following command to create a helper script (copy the whole block):
 
 ```bash
-# Download the setup script directly from your repo (or create it)
-cat << 'EOF' > setup_wif.sh
-#!/bin/bash
-set -e
+cat << 'EOF' > get_token.py
+import json
+from google_auth_oauthlib.flow import InstalledAppFlow
 
-# Configuration
-REPO="ivanquiroscenteno1234/jules-mobile-wrapper"
-SERVICE_ACCOUNT_NAME="github-action-sa"
-POOL_NAME="github-pool"
-PROVIDER_NAME="github-provider"
+# CONFIGURATION
+# ------------------------------------------------------------------
+# REPLACE THESE TWO VALUES WITH YOUR COPIED ID AND SECRET
+CLIENT_ID = "PASTE_YOUR_CLIENT_ID_HERE"
+CLIENT_SECRET = "PASTE_YOUR_CLIENT_SECRET_HERE"
+# ------------------------------------------------------------------
 
-echo "Setting up Workload Identity Federation for: $REPO"
-PROJECT_ID=$(gcloud config get-value project)
-echo "Project ID: $PROJECT_ID"
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-# Enable APIs
-gcloud services enable iamcredentials.googleapis.com cloudresourcemanager.googleapis.com sts.googleapis.com drive.googleapis.com
+def get_refresh_token():
+    config = {
+        "installed": {
+            "client_id": CLIENT_ID,
+            "project_id": "files-upload",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": CLIENT_SECRET,
+            "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"]
+        }
+    }
 
-# Create Service Account
-SA_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-if ! gcloud iam service-accounts describe "$SA_EMAIL" > /dev/null 2>&1; then
-    gcloud iam service-accounts create "$SERVICE_ACCOUNT_NAME" --display-name="GitHub Actions Service Account"
-fi
+    flow = InstalledAppFlow.from_client_config(config, SCOPES)
+    creds = flow.run_console()
 
-# Create Pool & Provider
-if ! gcloud iam workload-identity-pools describe "$POOL_NAME" --location="global" > /dev/null 2>&1; then
-    gcloud iam workload-identity-pools create "$POOL_NAME" --location="global" --display-name="GitHub Actions Pool"
-fi
-POOL_ID=$(gcloud iam workload-identity-pools describe "$POOL_NAME" --location="global" --format="value(name)")
+    print("\n\n========================================================")
+    print("SUCCESS! HERE IS YOUR REFRESH TOKEN:")
+    print("========================================================")
+    print(creds.refresh_token)
+    print("========================================================")
 
-if ! gcloud iam workload-identity-pools providers describe "$PROVIDER_NAME" --location="global" --workload-identity-pool="$POOL_NAME" > /dev/null 2>&1; then
-    gcloud iam workload-identity-pools providers create "$PROVIDER_NAME" --location="global" --workload-identity-pool="$POOL_NAME" \
-    --display-name="GitHub Actions Provider" \
-    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
-    --issuer-uri="https://token.actions.githubusercontent.com"
-fi
-PROVIDER_ID=$(gcloud iam workload-identity-pools providers describe "$PROVIDER_NAME" --location="global" --workload-identity-pool="$POOL_NAME" --format="value(name)")
-
-# Bind Repo
-gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
-    --role="roles/iam.workloadIdentityUser" \
-    --member="principalSet://iam.googleapis.com/${POOL_ID}/attribute.repository/${REPO}" \
-    --no-user-output-enabled
-
-echo ""
-echo "--------------------------------------------------------"
-echo "SETUP COMPLETE. PLEASE SAVE THESE VALUES:"
-echo "--------------------------------------------------------"
-echo "1. Service Account Email: $SA_EMAIL"
-echo "2. Provider ID:           $PROVIDER_ID"
-echo "--------------------------------------------------------"
+if __name__ == '__main__':
+    get_refresh_token()
 EOF
-
-# Run the script
-bash setup_wif.sh
 ```
 
-## Step 2: Share the Google Drive Folder
+3. **Edit the script** to add your Client ID and Secret:
+   *   Type `nano get_token.py`
+   *   Use arrow keys to find `PASTE_YOUR_CLIENT_ID_HERE` and replace it with your actual Client ID.
+   *   Replace `PASTE_YOUR_CLIENT_SECRET_HERE` with your actual Client Secret.
+   *   Press **Ctrl+O**, **Enter** to save.
+   *   Press **Ctrl+X** to exit.
 
-1. Copy the **Service Account Email** output by the script (e.g., `github-action-sa@your-project.iam.gserviceaccount.com`).
-2. Go to your [Google Drive Folder](https://drive.google.com/drive/folders/1JXRr0gVfuxJZC2tBxoTtRjyshSzAn7UO).
-3. Click the dropdown arrow next to the folder name > **Share**.
-4. Paste the email address into the "Add people and groups" field.
-5. Ensure the permission is set to **Editor**.
-6. Uncheck "Notify people" (optional, as it's a robot).
-7. Click **Send** (or Share).
+4. **Run the script:**
+   ```bash
+   pip3 install google-auth-oauthlib
+   python3 get_token.py
+   ```
+5. **Follow the prompts:**
+   *   It will show a URL. Click it.
+   *   Sign in with your Google account.
+   *   **Warning:** You will see "Google hasn't verified this app". Click **Advanced** > **Go to GitHub Actions Upload (unsafe)**.
+   *   Click **Continue** / **Allow**.
+   *   Copy the code displayed and paste it back into the Cloud Shell terminal.
+   *   Press Enter.
+   *   **Copy the Refresh Token** it prints out.
 
-## Step 3: Add GitHub Secrets
+## Step 4: Add GitHub Secrets
 
-1. Go to your GitHub Repository: `https://github.com/ivanquiroscenteno1234/jules-mobile-wrapper`
-2. Navigate to **Settings** > **Secrets and variables** > **Actions**.
-3. Click **New repository secret**.
-4. Add the first secret:
-   *   **Name:** `GCP_SERVICE_ACCOUNT`
-   *   **Value:** (Paste the Service Account Email from Step 1)
-5. Click **Add secret**.
-6. Click **New repository secret** again.
-7. Add the second secret:
-   *   **Name:** `GCP_WORKLOAD_IDENTITY_PROVIDER`
-   *   **Value:** (Paste the Provider ID from Step 1, it looks like `projects/123.../locations/global/workloadIdentityPools/...`)
-8. Click **Add secret**.
+1. Go to your GitHub Repo: **Settings** > **Secrets and variables** > **Actions**.
+2. Add the following 3 secrets:
 
-## Step 4: Verify
+   *   **Name:** `GDRIVE_CLIENT_ID`
+       *   **Value:** (Your Client ID)
+   *   **Name:** `GDRIVE_CLIENT_SECRET`
+       *   **Value:** (Your Client Secret)
+   *   **Name:** `GDRIVE_REFRESH_TOKEN`
+       *   **Value:** (The long token starting with `1//...`)
 
-Once these secrets are added, the next time you push code to `main`, the "Build and Upload" action will run automatically.
+## Step 5: Verify
+
+Once these secrets are added, go to the **Actions** tab and re-run the failed job. It should now successfully upload to your Drive!

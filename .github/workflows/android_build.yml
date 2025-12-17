@@ -3,27 +3,17 @@ name: Build and Upload Android APK
 on:
   push:
     branches:
-      - main
-      - master
+      - '**' # Trigger on all branches for testing
   workflow_dispatch:
 
 jobs:
   build:
     name: Build APK and Upload to Drive
     runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup Java
         uses: actions/setup-java@v3
@@ -36,29 +26,37 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Create Flutter Project Structure
+      - name: Create Temporary Build Project
         run: |
-          # Create a new blank flutter project
-          flutter create mobile_jules_client
+          # Create a clean flutter project with a specific organization to avoid default com.example
+          flutter create --org com.jules temp_build
 
-          # Remove the default lib and pubspec
-          rm -rf mobile_jules_client/lib mobile_jules_client/pubspec.yaml
+          # Remove default code
+          rm -rf temp_build/lib temp_build/pubspec.yaml
 
-          # Copy our source files into the new project
-          cp -r mobile_jules/client/lib mobile_jules_client/
-          cp mobile_jules/client/pubspec.yaml mobile_jules_client/
+          # Copy user code
+          cp -r mobile_jules/client/lib temp_build/
+          cp mobile_jules/client/pubspec.yaml temp_build/
+
+          # Inject INTERNET permission into AndroidManifest.xml
+          # We search for the <manifest> tag and insert the permission right after it
+          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>|' temp_build/android/app/src/main/AndroidManifest.xml
 
       - name: Install Dependencies
-        working-directory: ./mobile_jules_client
+        working-directory: ./temp_build
         run: flutter pub get
 
       - name: Build APK
-        working-directory: ./mobile_jules_client
+        working-directory: ./temp_build
         run: flutter build apk --release
 
       - name: Install Python Dependencies
         run: |
-          pip install google-api-python-client google-auth
+          pip install google-api-python-client google-auth-oauthlib google-auth
 
-      - name: Upload to Google Drive
-        run: python scripts/upload_to_drive.py
+      - name: Upload to Google Drive (OAuth)
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+        run: python scripts/upload_with_oauth.py

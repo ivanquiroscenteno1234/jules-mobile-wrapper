@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'main.dart'; // To access SERVER_URL
+import 'config.dart';
 
 class ChatScreen extends StatefulWidget {
   final String repoName;
@@ -26,7 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _connect() {
     // Convert 'http://...' to 'ws://...'
-    final wsUrl = SERVER_URL.replaceFirst('http', 'ws');
+    final wsUrl = AppConfig.serverUrl.replaceFirst('http', 'ws');
     // We must encode the sourceId because it contains slashes (e.g. "sources/github/...")
     // But our backend defines `{source_id:path}` which handles raw slashes.
     // However, just to be safe, if we send it as part of the path, we should assume the backend handles it.
