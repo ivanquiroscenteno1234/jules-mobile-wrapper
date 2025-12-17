@@ -8,15 +8,16 @@
 :: 1. Your Google/Jules API Key
 set GOOGLE_API_KEY="AQ.Ab8RN6KKEiLic-GInn3szRXG_fyX881-pHm10Mpk_cueHsVA0Q"
 
-:: 2. The full path to your 'mobile_jules/server' folder
-:: Example: C:\Users\Alice\Documents\jules-mobile-wrapper\mobile_jules\server
-cd /d "C:\PATH\TO\YOUR\jules-mobile-wrapper\mobile_jules\server"
-
 :: ==========================================
 :: END CONFIGURATION
 :: ==========================================
 
 echo Starting Mobile Jules Server...
+
+:: Switch to the directory where this script is located
+cd /d "%~dp0"
+
+:: Add parent directory to PYTHONPATH so jules_client can be imported if needed
 set PYTHONPATH=%PYTHONPATH%;..
 
 :: Check if python is available
@@ -27,5 +28,6 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+:: Run main.py directly to enable ngrok tunnel startup
+python main.py
 pause
