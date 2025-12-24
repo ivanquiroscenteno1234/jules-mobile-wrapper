@@ -30,12 +30,12 @@ This project allows you to "remote control" your coding environment from your mo
 
     **Windows (PowerShell):**
     ```powershell
-    $env:GOOGLE_API_KEY="your_actual_jules_api_key"
+    $env:JULES_API_KEY="your_actual_jules_api_key"
     ```
 
     **Windows (CMD):**
     ```cmd
-    set GOOGLE_API_KEY=your_actual_jules_api_key
+    set JULES_API_KEY=your_actual_jules_api_key
     ```
 
 4.  **Run the Server**:

@@ -23,15 +23,26 @@ class JulesClient:
             data = resp.json()
             return data.get("sources", [])
 
+    async def list_sessions(self, page_size: int = 30) -> List[Dict]:
+        """Lists existing sessions."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/sessions",
+                headers=self.headers,
+                params={"pageSize": page_size}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("sessions", [])
+
     async def create_session(self, source_id: str, prompt: str = "Start session") -> Dict:
         """Creates a new chat session."""
         payload = {
             "prompt": prompt,
             "sourceContext": {
                 "source": source_id,
-                 # Defaulting to main branch for now, could be parameterized
                 "githubRepoContext": {
-                    "startingBranch": "main"
+                    # Omit startingBranch to let Jules use the repo's default branch
                 }
             },
             # Optional: "automationMode": "AUTO_CREATE_PR"
@@ -64,22 +75,32 @@ class JulesClient:
             # we rely on list_activities to get the actual answer.
             return resp.json()
 
+    async def get_session(self, session_id: str) -> Dict:
+        """Gets a session's current state."""
+        url = f"{self.base_url}/{session_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self.headers)
+            if not resp.is_success:
+                print(f"DEBUG get_session error: {resp.status_code} - {resp.text}")
+            resp.raise_for_status()
+            return resp.json()
+
     async def list_activities(self, session_id: str, page_size: int = 30) -> List[Dict]:
         """Fetches the history of the session (user messages, agent plans/responses)."""
         url = f"{self.base_url}/{session_id}/activities"
         params = {"pageSize": page_size}
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
                 url,
                 headers=self.headers,
                 params=params
             )
+            if not resp.is_success:
+                print(f"DEBUG list_activities error: {resp.status_code} - {resp.text}")
             resp.raise_for_status()
             data = resp.json()
-            # Returns list of activities, usually sorted by time (check docs for order)
-            # We might need to reverse them if the API returns newest first? 
-            # Docs don't specify, but usually list endpoints return default order.
+            print(f"DEBUG list_activities response: {data}")  # Debug log
             return data.get("activities", [])
 
 # --- MOCK CLIENT FOR TESTING WITHOUT API KEY ---

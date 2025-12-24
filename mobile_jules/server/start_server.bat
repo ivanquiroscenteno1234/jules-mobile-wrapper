@@ -2,19 +2,19 @@
 :: Mobile Jules Server Startup Script
 :: ==========================================
 :: This script reads configuration from environment variables.
-:: Set GOOGLE_API_KEY in your system environment or create a
-:: 'set_env.bat' file (gitignored) with: set GOOGLE_API_KEY=your_key_here
+:: Set JULES_API_KEY in your system environment or create a
+:: 'set_env.bat' file (gitignored) with: set JULES_API_KEY=your_key_here
 :: ==========================================
 
 :: Load local environment if exists (this file should NOT be committed)
 if exist "%~dp0set_env.bat" call "%~dp0set_env.bat"
 
 :: Check if API key is set
-if "%GOOGLE_API_KEY%"=="" (
-    echo ERROR: GOOGLE_API_KEY is not set!
+if "%JULES_API_KEY%"=="" (
+    echo ERROR: JULES_API_KEY is not set!
     echo Please either:
-    echo   1. Set GOOGLE_API_KEY as a system environment variable, OR
-    echo   2. Create 'set_env.bat' in this folder with: set GOOGLE_API_KEY=your_key
+    echo   1. Set JULES_API_KEY as a system environment variable, OR
+    echo   2. Create 'set_env.bat' in this folder with: set JULES_API_KEY=your_key
     pause
     exit /b 1
 )
