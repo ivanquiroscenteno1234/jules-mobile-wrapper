@@ -35,8 +35,19 @@ class JulesClient:
             data = resp.json()
             return data.get("sessions", [])
 
-    async def create_session(self, source_id: str, prompt: str = "Start session") -> Dict:
-        """Creates a new chat session."""
+    async def create_session(
+        self, 
+        source_id: str, 
+        prompt: str = "Start session",
+        auto_mode: bool = False
+    ) -> Dict:
+        """Creates a new chat session.
+        
+        Args:
+            source_id: The source (repo) to work with
+            prompt: Initial task description
+            auto_mode: If True, auto-approve plans and auto-create PRs (DEFAULT: False)
+        """
         payload = {
             "prompt": prompt,
             "sourceContext": {
@@ -45,8 +56,14 @@ class JulesClient:
                     # Omit startingBranch to let Jules use the repo's default branch
                 }
             },
-            # Optional: "automationMode": "AUTO_CREATE_PR"
         }
+        
+        if auto_mode:
+            payload["automationMode"] = "AUTO_CREATE_PR"
+            payload["requirePlanApproval"] = False
+        else:
+            payload["requirePlanApproval"] = True
+            
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.base_url}/sessions",
@@ -97,11 +114,34 @@ class JulesClient:
                 params=params
             )
             if not resp.is_success:
-                print(f"DEBUG list_activities error: {resp.status_code} - {resp.text}")
+                print(f"DEBUG list_activities error: {resp.status_code}")
             resp.raise_for_status()
             data = resp.json()
-            print(f"DEBUG list_activities response: {data}")  # Debug log
-            return data.get("activities", [])
+            activities = data.get("activities", [])
+            print(f"DEBUG list_activities: fetched {len(activities)} activities")
+            return activities
+
+    async def approve_plan(self, session_id: str) -> Dict:
+        """Approves the current plan for a session."""
+        url = f"{self.base_url}/{session_id}:approvePlan"
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=self.headers, json={})
+            if not resp.is_success:
+                print(f"DEBUG approve_plan error: {resp.status_code} - {resp.text}")
+            resp.raise_for_status()
+            return resp.json()
+
+    async def submit_branch(self, session_id: str, create_pr: bool = False) -> Dict:
+        """The Jules API doesn't support direct publishing via API.
+        This method returns info for the client to open Jules Web.
+        """
+        # We don't perform an API call here because research shows it doesn't exist.
+        # Instead we return information for the UI to guide the user.
+        return {
+            "status": "web_fallback",
+            "message": "Publishing must be done through the Jules Web UI or via AUTO_CREATE_PR mode.",
+            "url": f"https://jules.google.com/{session_id}" if not session_id.startswith("http") else session_id
+        }
 
 # --- MOCK CLIENT FOR TESTING WITHOUT API KEY ---
 

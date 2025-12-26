@@ -1,13 +1,18 @@
 import os
+import json
 import asyncio
-from typing import List, Dict
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+import uuid
+from typing import List, Dict, Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
 # Import the Client
 from jules_client import JulesClient, MockJulesClient
+from notifications import notification_service, SessionPoller
+from tester_agent import tester_agent
+from github_client import get_github_client
 
 app = FastAPI()
 
@@ -29,6 +34,24 @@ if API_KEY:
 else:
     print("WARNING: No JULES_API_KEY found. Using MockJulesClient.")
     client = MockJulesClient(api_key="dummy")
+
+# Session poller for notifications
+session_poller = SessionPoller(client, notification_service)
+
+# In-memory storage for completed session changeSet data
+# Key: session_id, Value: {source, patch, commit_message, base_commit_id}
+completed_session_data: Dict[str, Dict] = {}
+
+# Device registration model
+class DeviceRegistration(BaseModel):
+    user_id: str
+    fcm_token: str
+
+@app.post("/register-device")
+async def register_device(reg: DeviceRegistration):
+    """Register a device's FCM token for push notifications."""
+    notification_service.register_device(reg.user_id, reg.fcm_token)
+    return {"success": True}
 
 class Repo(BaseModel):
     name: str
@@ -65,150 +88,667 @@ async def list_repos():
 
 @app.get("/sessions")
 async def list_sessions():
-    """Lists existing Jules sessions for debugging."""
+    """Lists existing Jules sessions."""
     try:
         sessions = await client.list_sessions()
-        print(f"DEBUG: Found {len(sessions)} sessions")
-        for s in sessions:
-            print(f"DEBUG session: {s}")
         return {"sessions": sessions}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/sessions/{session_id:path}")
+async def get_session(session_id: str):
+    """Gets a specific session's details including PR outputs."""
+    try:
+        session = await client.get_session(session_id)
+        
+        # Extract PR information from outputs if available
+        prs = []
+        if "outputs" in session:
+            for output in session["outputs"]:
+                if "pullRequest" in output:
+                    pr = output["pullRequest"]
+                    prs.append({
+                        "url": pr.get("url"),
+                        "title": pr.get("title"),
+                        "description": pr.get("description")
+                    })
+        
+        session["pullRequests"] = prs
+        return session
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sessions/{session_id:path}/approve")
+async def approve_plan(session_id: str):
+    """Approves the current plan for a session."""
+    try:
+        result = await client.approve_plan(session_id)
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sessions/{session_id:path}/publish")
+async def publish_branch(session_id: str, create_pr: bool = Query(False)):
+    """Publishes the branch (and optionally creates a PR) for a completed session.
+    
+    Args:
+        session_id: The session ID
+        create_pr: If True, also creates a pull request
+    """
+    try:
+        result = await client.submit_branch(session_id, create_pr=create_pr)
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/repos/{owner}/{repo}/branches")
+async def list_repo_branches(owner: str, repo: str):
+    """List all branches in a GitHub repository."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured."
+        )
+    
+    try:
+        branches = await github_client.list_branches(owner, repo)
+        return {"branches": branches}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sessions/{session_id:path}/github-pr")
+async def create_github_pr(
+    session_id: str,
+    base_branch: str = Query("main"),
+    branch_only: bool = Query(False)
+):
+    """Creates a GitHub branch/PR directly using the stored changeSet data.
+    
+    Args:
+        session_id: The session ID
+        base_branch: The target branch to base the PR on (default: main)
+        branch_only: If True, only create branch without PR
+    """
+    # Check if we have GitHub client
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured. Please set the GITHUB_TOKEN environment variable."
+        )
+    
+    # Get the stored changeSet data
+    if session_id not in completed_session_data:
+        # Try to fetch from session
+        try:
+            session_data = await client.get_session(session_id)
+            activities = await client.list_activities(session_id)
+            
+            # Find sessionCompleted activity with changeSet
+            for activity in reversed(activities):
+                if "sessionCompleted" in activity or "artifacts" in activity:
+                    for artifact in activity.get("artifacts", []):
+                        if "changeSet" in artifact:
+                            cs = artifact["changeSet"]
+                            completed_session_data[session_id] = {
+                                "source": cs.get("source", ""),
+                                "patch": cs.get("gitPatch", {}).get("unidiffPatch", ""),
+                                "commit_message": cs.get("gitPatch", {}).get("suggestedCommitMessage", "Changes by Jules"),
+                                "base_commit_id": cs.get("gitPatch", {}).get("baseCommitId"),
+                            }
+                            break
+                if session_id in completed_session_data:
+                    break
+        except Exception as e:
+            print(f"Error fetching session data: {e}")
+    
+    if session_id not in completed_session_data:
+        raise HTTPException(
+            status_code=404, 
+            detail="No changeSet data found for this session. The session may not be completed."
+        )
+    
+    data = completed_session_data[session_id]
+    
+    if not data.get("patch"):
+        raise HTTPException(status_code=400, detail="No patch data available for this session.")
+    
+    # Parse source to get owner/repo
+    # Format: sources/github/owner/repo
+    source = data["source"]
+    parts = source.replace("sources/github/", "").split("/")
+    if len(parts) < 2:
+        raise HTTPException(status_code=400, detail=f"Invalid source format: {source}")
+    
+    owner = parts[0]
+    repo = parts[1]
+    
+    try:
+        result = await github_client.create_pr_from_patch(
+            owner=owner,
+            repo=repo,
+            patch=data["patch"],
+            commit_message=data["commit_message"],
+            base_branch=base_branch,
+            base_commit_id=data.get("base_commit_id"),
+            branch_only=branch_only,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/chat/{source_id:path}") # :path allows slashes in source_id
-async def websocket_endpoint(websocket: WebSocket, source_id: str):
+async def websocket_endpoint(
+    websocket: WebSocket, 
+    source_id: str, 
+    session_id: Optional[str] = Query(None),  # For reconnecting to existing session
+    auto_mode: bool = Query(False)  # Auto-approve plans and create PRs
+):
     await websocket.accept()
     
-    # Create a new session for this connection
-    # Use a prompt that tells Jules to wait for instructions rather than start working immediately
-    try:
-        initial_prompt = "Hello! I'm connecting from a mobile app. Please wait for my instructions before starting any work. Just acknowledge this connection and let me know you're ready."
-        session_data = await client.create_session(source_id=source_id, prompt=initial_prompt)
-        print(f"DEBUG: Full session data = {session_data}")  # Debug log
-        
-        # The session response should have a "name" field with format "sessions/{id}"
-        session_id = session_data.get("name")
-        if not session_id:
-            # Fallback: try to construct from "id" field
-            raw_id = session_data.get("id", "")
-            session_id = f"sessions/{raw_id}" if raw_id else None
-        
-        if not session_id:
-            await websocket.send_text(f"System: Error - Could not extract session ID from response: {session_data}")
-            await websocket.close()
-            return
-            
-        print(f"DEBUG: Using session_id = {session_id}")  # Debug log
-        await websocket.send_text(f"System: Connected to Jules Session {session_id}")
-        
-        # Verify the session exists by fetching it
-        try:
-            session_check = await client.get_session(session_id)
-            print(f"DEBUG: Session check = {session_check}")
-        except Exception as check_err:
-            print(f"DEBUG: Could not verify session: {check_err}")
-    except Exception as e:
-        await websocket.send_text(f"System: Error creating session: {str(e)}")
-        await websocket.close()
-        return
-
-    # Track which activities we've already sent to the client to avoid duplicates
+    # Track which activities we've already sent to the client
     seen_activity_ids = set()
-
+    poller_task = None
+    active_session_id = session_id  # Will be set when session is created/reconnected
+    
     async def poll_jules():
         """Background task to poll for new messages/activities from Jules."""
-        while True:
+        cached_session_data = None
+        while active_session_id:
             try:
-                activities = await client.list_activities(session_id)
-                # Sort by time if needed, but assuming API returns logical order or we just check IDs
+                activities = await client.list_activities(active_session_id)
                 for activity in activities:
                     act_id = activity.get("id") or activity.get("name")
                     if act_id not in seen_activity_ids:
                         seen_activity_ids.add(act_id)
                         
-                        # Parse the activity to a friendly string
-                        message = parse_activity(activity)
-                        if message:
-                            await websocket.send_text(message)
+                        # For sessionCompleted, fetch fresh session data for PR info
+                        if "sessionCompleted" in activity:
+                            try:
+                                cached_session_data = await client.get_session(active_session_id)
+                            except Exception as e:
+                                print(f"Error fetching session data: {e}")
+                        
+                        # Parse activity to structured JSON, passing session data
+                        parsed = parse_activity(activity, session_data=cached_session_data)
+                        if parsed:
+                            await websocket.send_json(parsed)
                 
-                await asyncio.sleep(2) # Poll every 2 seconds
+                await asyncio.sleep(2)  # Poll every 2 seconds
             except Exception as e:
                 print(f"Polling error: {e}")
-                # Don't crash the loop, just wait and retry
                 await asyncio.sleep(5)
-
-    # Start the polling loop
-    poller = asyncio.create_task(poll_jules())
+    
+    try:
+        if session_id:
+            # Reconnecting to existing session
+            print(f"DEBUG: Reconnecting to session {session_id}", flush=True)
+            session_data = await client.get_session(session_id)
+            active_session_id = session_id
+            
+            # Debug: Check what's in session_data
+            print(f"DEBUG: session_data keys: {list(session_data.keys()) if session_data else 'None'}", flush=True)
+            if session_data and "outputs" in session_data:
+                print(f"DEBUG: session_data.outputs: {session_data['outputs']}", flush=True)
+            else:
+                print(f"DEBUG: session_data has NO outputs field", flush=True)
+            
+            # Send connection confirmation
+            await websocket.send_json({
+                "type": "system",
+                "content": "Reconnected to session",
+                "sessionId": session_id
+            })
+            
+            # IMPORTANT: Immediately fetch and send ALL existing activities (history)
+            print(f"DEBUG: Loading session history...", flush=True)
+            try:
+                activities = await client.list_activities(session_id, page_size=100)
+                print(f"DEBUG: Found {len(activities)} historical activities", flush=True)
+                
+                # Send activities in order (oldest first for proper display)
+                for activity in activities:
+                    act_id = activity.get("id") or activity.get("name")
+                    if act_id:
+                        seen_activity_ids.add(act_id)
+                        parsed = parse_activity(activity, session_data=session_data)
+                        if parsed:
+                            await websocket.send_json(parsed)
+                
+                await websocket.send_json({
+                    "type": "system",
+                    "content": f"Loaded {len(activities)} previous activities"
+                })
+            except Exception as e:
+                print(f"Error loading history: {e}")
+                await websocket.send_json({
+                    "type": "system", 
+                    "content": f"Warning: Could not load full history"
+                })
+            
+            # Now start polling for NEW activities
+            poller_task = asyncio.create_task(poll_jules())
+        else:
+            # NEW: Don't create session yet - wait for user's first message
+            # Send a ready message to the client
+            await websocket.send_json({
+                "type": "system",
+                "content": "Ready! Send your task to start working.",
+                "status": "waiting_for_task"
+            })
+            print(f"DEBUG: Waiting for user's first message to create session for source {source_id}")
+        
+    except Exception as e:
+        await websocket.send_json({"type": "error", "content": str(e)})
+        await websocket.close()
+        return
 
     try:
         while True:
             # Wait for user message from phone
             data = await websocket.receive_text()
-            # Send to Jules
-            await client.send_message(session_id, data)
+            
+            # If no session yet, create one with this message as the task
+            if not active_session_id:
+                try:
+                    await websocket.send_json({
+                        "type": "status",
+                        "content": "Creating session and sending task to Jules..."
+                    })
+                    
+                    # Create session with user's message as the actual task
+                    session_data = await client.create_session(
+                        source_id=source_id, 
+                        prompt=data,  # User's first message becomes the task
+                        auto_mode=auto_mode
+                    )
+                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    
+                    # Extract session_id from response
+                    active_session_id = session_data.get("name")
+                    if not active_session_id:
+                        raw_id = session_data.get("id", "")
+                        active_session_id = f"sessions/{raw_id}" if raw_id else None
+                    
+                    if not active_session_id:
+                        await websocket.send_json({"type": "error", "content": "Could not create session"})
+                        continue
+                    
+                    # Send confirmation
+                    await websocket.send_json({
+                        "type": "system",
+                        "content": "Session created! Jules is working on your task.",
+                        "sessionId": active_session_id
+                    })
+                    
+                    # Start polling for this session
+                    poller_task = asyncio.create_task(poll_jules())
+                    
+                except Exception as e:
+                    await websocket.send_json({"type": "error", "content": f"Failed to create session: {e}"})
+                    
+            else:
+                # Session already exists, handle commands or send messages
+                if data.startswith("/approve"):
+                    await client.approve_plan(active_session_id)
+                    await websocket.send_json({"type": "system", "content": "Plan approved!"})
+                else:
+                    # Send regular message to Jules
+                    await client.send_message(active_session_id, data)
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")
     finally:
-        poller.cancel()
+        if 'poller_task' in dir() and poller_task:
+            poller_task.cancel()
 
-def parse_activity(activity: Dict) -> str:
-    """Converts a Jules Activity JSON into a readable string for the chat."""
-    print(f"DEBUG parse_activity: {activity}")  # Debug log
+def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
+    """Converts a Jules Activity JSON into a structured dict for the Flutter app.
     
-    # Get the actor/originator
-    actor = activity.get("actor") or activity.get("originator", "unknown")
+    Args:
+        activity: The activity dict from Jules API
+        session_data: Optional session dict containing outputs[] with PR info
+    """
+    # Debug: Log all activity keys to understand structure
+    act_keys = [k for k in activity.keys() if k not in {"name", "id", "createTime", "originator"}]
+    if act_keys:
+        print(f"DEBUG parse_activity: keys={act_keys}, has_artifacts={'artifacts' in activity}", flush=True)
     
-    if actor == "user":
-        # We might not want to echo user messages back if the UI already shows them
-        return None 
+    result = {
+        "id": activity.get("id") or activity.get("name"),
+        "type": "message",
+        "originator": activity.get("originator", "agent"),
+        "timestamp": activity.get("createTime"),
+    }
     
-    # Look for message content in various possible fields
-    # Jules API may use different field names for different activity types
+    # Skip user activities UNLESS it's a userMessaged activity (we want to show those)
+    if result["originator"] == "user" and "userMessaged" not in activity:
+        return None
     
-    # Check for agentMessaged (agent sending a message)
+    # Plan Generated - show expandable steps
+    if "planGenerated" in activity:
+        plan_data = activity["planGenerated"].get("plan", {})
+        result["type"] = "plan"
+        result["planId"] = plan_data.get("id")
+        result["steps"] = [
+            {"id": s.get("id"), "title": s.get("title"), "index": s.get("index", i)}
+            for i, s in enumerate(plan_data.get("steps", []))
+        ]
+        result["content"] = f"Plan with {len(result['steps'])} steps"
+        return result
+    
+    # Agent Message
     if "agentMessaged" in activity:
         msg = activity["agentMessaged"]
-        # The actual field name is 'agentMessage' (discovered from debug logs)
-        text = msg.get("agentMessage") or msg.get("text") or msg.get("message") or msg.get("content", "")
-        if text:
-            return f"Jules: {text}"
+        result["type"] = "message"
+        result["content"] = msg.get("agentMessage") or msg.get("text") or msg.get("message", "")
+        return result
     
-    # Check for sessionProgress (status updates like "Booting VM", "Cloning repo")
-    if "sessionProgress" in activity:
-        progress = activity["sessionProgress"]
-        status = progress.get("status") or progress.get("message", "")
-        return f"Jules: [Status] {status}"
+    # User Message (user's chat messages)
+    if "userMessaged" in activity:
+        # Log the full activity to find the correct field
+        print(f"DEBUG userMessaged FOUND: full activity keys = {list(activity.keys())}", flush=True)
+        print(f"DEBUG userMessaged value: {activity['userMessaged']}", flush=True)
+        msg = activity["userMessaged"]
+        message_content = msg.get("userMessage") or msg.get("text") or msg.get("message") or msg.get("content", "")
+        if message_content:
+            result["type"] = "user"
+            result["originator"] = "user"
+            result["content"] = message_content
+            print(f"DEBUG userMessaged: returning user message = '{message_content[:50]}...'", flush=True)
+            return result
+        else:
+            print(f"DEBUG userMessaged: message_content was empty, msg={msg}", flush=True)
     
-    # Handle Plan Activities
-    if "planGenerated" in activity:
-        plan = activity["planGenerated"]
-        if isinstance(plan, dict) and "plan" in plan:
-            steps = len(plan["plan"].get("steps", []))
-            return f"Jules: I have generated a plan with {steps} steps."
-        return f"Jules: Plan generated"
+    # Text output / thought / summary from agent
+    if "textGenerated" in activity:
+        tg = activity["textGenerated"]
+        result["type"] = "message"
+        result["content"] = tg.get("text") or tg.get("content", "")
+        return result
     
+    # Generic text field (some activities have this)
+    if "text" in activity and isinstance(activity["text"], str):
+        result["type"] = "message"
+        result["content"] = activity["text"]
+        return result
+    
+    # Thought or summary messages
+    if "thought" in activity:
+        result["type"] = "message"
+        result["content"] = activity["thought"].get("text") or activity["thought"].get("content", "")
+        return result
+    
+    # Summary message
+    if "summary" in activity and isinstance(activity["summary"], str):
+        result["type"] = "message"
+        result["content"] = activity["summary"]
+        return result
+    
+    # Progress Update - DON'T return early if artifacts exist
     if "progressUpdated" in activity:
         progress = activity["progressUpdated"]
-        title = progress.get("title", "")
-        desc = progress.get("description", "")
-        return f"Jules: {title}\n{desc}" if title or desc else None
+        result["type"] = "progress"
+        result["title"] = progress.get("title", "")
+        result["description"] = progress.get("description", "")
+        result["content"] = result["title"]
+        # Only return early if there are NO artifacts
+        if "artifacts" not in activity:
+            return result
     
-    # Check for generic description field
-    if "description" in activity:
-        return f"Jules: {activity['description']}"
+    # Session Completed
+    if "sessionCompleted" in activity:
+        # Extract Jules session web URL
+        jules_url = session_data.get("url") if session_data else None
+        session_id = session_data.get("id") if session_data else activity.get("name", "").split("/activities/")[0]
+        if not jules_url and session_id:
+            jules_url = f"https://jules.google.com/{session_id}"
+            
+        # Try to find changeSet in artifacts
+        artifacts = activity.get("artifacts", [])
+        print(f"DEBUG sessionCompleted: session_id={session_id}, num_artifacts={len(artifacts)}")
+        for i, art in enumerate(artifacts):
+            print(f"DEBUG sessionCompleted artifact {i}: keys={list(art.keys())}")
+        
+        change_set = {}
+        for artifact in artifacts:
+            if "changeSet" in artifact:
+                change_set = artifact["changeSet"]
+                break
+        
+        # Store changeSet data for GitHub PR creation
+        if change_set and session_id:
+            git_patch = change_set.get("gitPatch", {})
+            completed_session_data[session_id] = {
+                "source": change_set.get("source", ""),
+                "patch": git_patch.get("unidiffPatch", ""),
+                "commit_message": git_patch.get("suggestedCommitMessage", "Changes by Jules"),
+                "base_commit_id": git_patch.get("baseCommitId"),
+            }
+            print(f"DEBUG Stored changeSet for session {session_id}")
+        
+        # Extract info from changeSet (available during live sessions)
+        commit_message = change_set.get("gitPatch", {}).get("suggestedCommitMessage", "Changes by Jules")
+        
+        # Try to extract the branch from outputs or changeSet
+        outputs = session_data.get("outputs", []) if session_data else []
+        pr_url = None
+        for output in outputs:
+            if "pullRequest" in output:
+                pr_url = output["pullRequest"].get("url")
+                break
+        
+        repo_name = ""
+        source = ""
+        if session_data:
+            source = session_data.get("sourceContext", {}).get("source", "")
+            repo_name = source.split("/")[-1]
+        
+        # Check if we have patch data (for the "Create PR" button)
+        has_patch = bool(change_set.get("gitPatch", {}).get("unidiffPatch"))
+        
+        response = {
+            "id": result["id"],
+            "timestamp": result["timestamp"],
+            "originator": "agent",
+            "type": "completed",
+            "message": "Task completed! Check the details below.",
+            "title": "PR Review Card",
+            "description": commit_message,
+            "pullRequestUrl": pr_url,
+            "julesUrl": jules_url,
+            "repoName": repo_name,
+            "hasPatch": has_patch,
+            "sessionId": session_id,
+        }
+        print(f"DEBUG sessionCompleted response: hasPatch={has_patch}, sessionId={session_id}, pr_url={pr_url}")
+        return response
     
-    # Check for text field
-    if "text" in activity:
-        return f"Jules: {activity['text']}"
+    # Session Progress (status updates)
+    if "sessionProgress" in activity:
+        progress = activity["sessionProgress"]
+        result["type"] = "status"
+        result["content"] = progress.get("status") or progress.get("message", "Working...")
+        return result
     
-    # Check for message field
-    if "message" in activity:
-        return f"Jules: {activity['message']}"
+    # Agent Messaged (Jules' text/chat responses)
+    if "agentMessaged" in activity:
+        agent_msg = activity["agentMessaged"]
+        message = agent_msg.get("message") or agent_msg.get("text") or agent_msg.get("content", "")
+        if message:
+            result["type"] = "message"
+            result["originator"] = "agent"
+            result["content"] = message
+            return result
     
-    # Default fallback - show activity name/type
-    name = activity.get("name", "unknown")
-    return f"Jules: [Activity: {name}]"
+    
+    # Tool Called (commands executed)
+    if "toolCalled" in activity:
+        tool = activity["toolCalled"]
+        tool_name = tool.get("name", "")
+        tool_input = tool.get("input", {})
+        
+        # Extract command if it's a bash/shell tool
+        command = tool_input.get("command") or tool_input.get("cmd") or ""
+        if command:
+            result["type"] = "artifact"
+            result["content"] = f"Ran: {command}"
+            return result
+        elif tool_name:
+            result["type"] = "artifact"
+            result["content"] = f"Tool: {tool_name}"
+            return result
+    
+    # Step Updated (plan step progress)
+    if "stepUpdated" in activity:
+        step = activity["stepUpdated"]
+        title = step.get("title") or step.get("description") or ""
+        status = step.get("status", "")
+        if title:
+            result["type"] = "progress"
+            result["title"] = title
+            result["content"] = f"{status}: {title}" if status else title
+            return result
+    
+    # Task Started/Completed
+    if "taskStarted" in activity:
+        task = activity["taskStarted"]
+        result["type"] = "status"
+        result["content"] = task.get("description") or task.get("title") or "Task started"
+        return result
+    
+    # Command Executed (another potential format)
+    if "commandExecuted" in activity:
+        cmd = activity["commandExecuted"]
+        command = cmd.get("command") or cmd.get("cmd", "")
+        if command:
+            result["type"] = "artifact"
+            result["content"] = f"Ran: {command}"
+            return result
+    
+    # Handle artifacts (file changes, bash output)
+    if "artifacts" in activity:
+        result["artifacts"] = []
+        content_parts = []
+        
+        # Debug: Log what artifacts we're getting
+        for i, art in enumerate(activity["artifacts"]):
+            art_keys = list(art.keys())
+            print(f"DEBUG: Artifact {i} keys: {art_keys}", flush=True)
+        
+        for art in activity["artifacts"]:
+            if "changeSet" in art:
+                cs = art["changeSet"]
+                git_patch = cs.get("gitPatch", {})
+                unidiff = git_patch.get("unidiffPatch", "")
+                
+                # Extract file paths from the unidiff patch (lines starting with +++ b/ or --- a/)
+                file_paths = []
+                for line in unidiff.split("\n"):
+                    # Handle "+++ b/path/file.tsx" format
+                    if line.startswith("+++ b/"):
+                        path = line[6:].strip()  # Skip "+++ b/" prefix
+                        if path and path != "/dev/null" and path not in file_paths:
+                            file_paths.append(path)
+                    # Handle "--- a/path/file.tsx" format  
+                    elif line.startswith("--- a/"):
+                        path = line[6:].strip()  # Skip "--- a/" prefix
+                        if path and path != "/dev/null" and path not in file_paths:
+                            file_paths.append(path)
+                    # Handle "+++ path/file.tsx" format (no a/b prefix)
+                    elif line.startswith("+++ ") and not line.startswith("+++\t"):
+                        path = line[4:].strip()
+                        if path and path != "/dev/null" and path not in file_paths:
+                            file_paths.append(path)
+                    elif line.startswith("--- ") and not line.startswith("---\t"):
+                        path = line[4:].strip()
+                        if path and path != "/dev/null" and path not in file_paths:
+                            file_paths.append(path)
+                
+                # Use extracted file paths or fall back to commit message
+                if file_paths:
+                    for fp in file_paths:
+                        content_parts.append(f"Updated: {fp}")
+                    result["artifacts"].append({
+                        "type": "file_change",
+                        "files": file_paths,
+                        "patch": unidiff,
+                        "commitMsg": git_patch.get("suggestedCommitMessage", "")
+                    })
+                else:
+                    commit_msg = git_patch.get("suggestedCommitMessage", "File updated")
+                    result["artifacts"].append({
+                        "type": "file_change",
+                        "patch": unidiff,
+                        "commitMsg": commit_msg
+                    })
+                    content_parts.append(f"Updated: {commit_msg}")
+            
+            # Handle fileUpdated artifacts (single file updates)
+            elif "fileUpdated" in art:
+                fu = art["fileUpdated"]
+                file_path = fu.get("path", "") or fu.get("filePath", "")
+                if file_path:
+                    content_parts.append(f"Updated: {file_path}")
+                    result["artifacts"].append({
+                        "type": "file_change",
+                        "files": [file_path],
+                        "patch": fu.get("content", "")
+                    })
+                    
+            elif "bashOutput" in art:
+                command = art["bashOutput"].get("command", "")
+                output = art["bashOutput"].get("output", "")
+                print(f"DEBUG: BashOutput found - command: {command[:50] if command else 'EMPTY'}")
+                result["artifacts"].append({
+                    "type": "bash",
+                    "command": command,
+                    "output": output
+                })
+                if command:
+                    content_parts.append(f"Ran: {command}")
+                    
+            elif "media" in art:
+                result["artifacts"].append({
+                    "type": "media",
+                    "mimeType": art["media"].get("mimeType", "")
+                })
+                content_parts.append("Generated media")
+            else:
+                # Unknown artifact type - log it
+                print(f"DEBUG: Unknown artifact type with keys: {list(art.keys())}")
+        
+        # Set content from artifacts if we found any
+        if content_parts:
+            result["type"] = "artifact"
+            result["content"] = "\n".join(content_parts)
+            return result
+        elif result["artifacts"]:
+            # We have artifacts but no content - something went wrong
+            print(f"DEBUG: Artifacts parsed but no content generated. Count: {len(result['artifacts'])}")
+    
+    # Default fallback
+    if "content" not in result:
+        # Try to extract any text from the activity
+        result["content"] = (
+            activity.get("description") or 
+            activity.get("text") or 
+            activity.get("message") or
+            ""
+        )
+    
+    # Skip completely empty activities
+    if not result.get("content") and not result.get("artifacts"):
+        # Log unhandled activity types for debugging
+        known_keys = {"id", "name", "createTime", "originator"}
+        unknown_keys = [k for k in activity.keys() if k not in known_keys]
+        if unknown_keys:
+            print(f"DEBUG: Unhandled activity keys: {unknown_keys}")
+        return None
+    
+    return result
 
 if __name__ == "__main__":
     # Attempt to start ngrok for easier mobile testing
@@ -229,3 +769,40 @@ if __name__ == "__main__":
         print(f"Warning: Could not start ngrok: {e}")
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ===== Tester Agent Endpoints =====
+
+class TestRequest(BaseModel):
+    url: str
+    objective: str
+
+@app.post("/test/start")
+async def start_test(request: TestRequest, background_tasks: BackgroundTasks):
+    """Start a new test with the Tester Agent."""
+    test_id = str(uuid.uuid4())[:8]
+    
+    async def run_test():
+        await tester_agent.run_test(test_id, request.url, request.objective)
+    
+    background_tasks.add_task(asyncio.create_task, run_test())
+    
+    return {
+        "test_id": test_id,
+        "status": "started",
+        "url": request.url,
+        "objective": request.objective
+    }
+
+@app.get("/test/status/{test_id}")
+async def get_test_status(test_id: str):
+    """Get the status and results of a test."""
+    result = tester_agent.get_test(test_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Test not found")
+    return tester_agent.to_json(result)
+
+@app.get("/tests")
+async def list_tests():
+    """List all tests."""
+    return [tester_agent.to_json(t) for t in tester_agent.tests.values()]
