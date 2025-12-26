@@ -14,9 +14,11 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   late WebSocketChannel _channel;
   final List<String> _messages = [];
   bool _isConnected = false;
+  bool _isWaiting = true; // Start waiting for initial connection response
 
   @override
   void initState() {
@@ -27,10 +29,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void _connect() {
     // Convert 'http://...' to 'ws://...'
     final wsUrl = AppConfig.serverUrl.replaceFirst('http', 'ws');
-    // We must encode the sourceId because it contains slashes (e.g. "sources/github/...")
-    // But our backend defines `{source_id:path}` which handles raw slashes.
-    // However, just to be safe, if we send it as part of the path, we should assume the backend handles it.
-    // The backend uses `{source_id:path}`, so "sources/github/a/b" is valid.
     final uri = Uri.parse('$wsUrl/chat/${widget.sourceId}');
     
     try {
@@ -41,19 +39,26 @@ class _ChatScreenState extends State<ChatScreen> {
       _channel.stream.listen(
         (message) {
           setState(() {
-            _messages.add(message); // Message already formatted by server as "Jules: ..." or "System: ..."
+            _messages.add(message);
+            // Stop waiting when we receive a Jules message
+            if (message.startsWith("Jules: ")) {
+              _isWaiting = false;
+            }
           });
+          _scrollToBottom();
         },
         onError: (error) {
           setState(() {
             _messages.add("System: Connection Error: $error");
             _isConnected = false;
+            _isWaiting = false;
           });
         },
         onDone: () {
           setState(() {
             _messages.add("System: Disconnected.");
             _isConnected = false;
+            _isWaiting = false;
           });
         },
       );
@@ -61,8 +66,21 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _messages.add("System: Could not connect: $e");
         _isConnected = false;
+        _isWaiting = false;
       });
     }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
@@ -71,6 +89,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _channel.sink.close();
     }
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -80,10 +99,12 @@ class _ChatScreenState extends State<ChatScreen> {
       
       setState(() {
         _messages.add("Me: $text");
+        _isWaiting = true; // Start waiting for response
       });
       
       _channel.sink.add(text);
       _controller.clear();
+      _scrollToBottom();
     }
   }
 
@@ -91,16 +112,22 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${widget.repoName}'),
+        title: Text(widget.repoName),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: Column(
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
+              itemCount: _messages.length + (_isWaiting ? 1 : 0),
               itemBuilder: (context, index) {
+                // Show thinking indicator as last item when waiting
+                if (_isWaiting && index == _messages.length) {
+                  return _buildThinkingIndicator();
+                }
+                
                 final msg = _messages[index];
                 final isMe = msg.startsWith("Me: ");
                 final isSystem = msg.startsWith("System: ");
@@ -154,12 +181,48 @@ class _ChatScreenState extends State<ChatScreen> {
                 IconButton(
                   icon: const Icon(Icons.send),
                   color: Colors.deepPurple,
-                  onPressed: _sendMessage,
+                  onPressed: _isWaiting ? null : _sendMessage,
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildThinkingIndicator() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.deepPurple,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Jules is thinking...',
+              style: TextStyle(
+                fontSize: 16,
+                fontStyle: FontStyle.italic,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

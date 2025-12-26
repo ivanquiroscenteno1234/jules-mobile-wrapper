@@ -21,19 +21,25 @@ app.add_middleware(
 )
 
 # Configuration
-API_KEY = os.environ.get("GOOGLE_API_KEY")
+API_KEY = os.environ.get("JULES_API_KEY")
 
 # Choose client based on environment
 if API_KEY:
     client = JulesClient(api_key=API_KEY)
 else:
-    print("WARNING: No GOOGLE_API_KEY found. Using MockJulesClient.")
+    print("WARNING: No JULES_API_KEY found. Using MockJulesClient.")
     client = MockJulesClient(api_key="dummy")
 
 class Repo(BaseModel):
     name: str
     id: str
     full_name: str
+
+class Session(BaseModel):
+    name: str
+    id: str
+    title: str = ""
+    source: str = ""
 
 @app.get("/repos", response_model=List[Repo])
 async def list_repos():
@@ -57,15 +63,50 @@ async def list_repos():
     except Exception as e:
          raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/sessions")
+async def list_sessions():
+    """Lists existing Jules sessions for debugging."""
+    try:
+        sessions = await client.list_sessions()
+        print(f"DEBUG: Found {len(sessions)} sessions")
+        for s in sessions:
+            print(f"DEBUG session: {s}")
+        return {"sessions": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.websocket("/chat/{source_id:path}") # :path allows slashes in source_id
 async def websocket_endpoint(websocket: WebSocket, source_id: str):
     await websocket.accept()
     
     # Create a new session for this connection
+    # Use a prompt that tells Jules to wait for instructions rather than start working immediately
     try:
-        session_data = await client.create_session(source_id=source_id, prompt="Mobile app connected")
-        session_id = session_data["name"] # "sessions/..."
+        initial_prompt = "Hello! I'm connecting from a mobile app. Please wait for my instructions before starting any work. Just acknowledge this connection and let me know you're ready."
+        session_data = await client.create_session(source_id=source_id, prompt=initial_prompt)
+        print(f"DEBUG: Full session data = {session_data}")  # Debug log
+        
+        # The session response should have a "name" field with format "sessions/{id}"
+        session_id = session_data.get("name")
+        if not session_id:
+            # Fallback: try to construct from "id" field
+            raw_id = session_data.get("id", "")
+            session_id = f"sessions/{raw_id}" if raw_id else None
+        
+        if not session_id:
+            await websocket.send_text(f"System: Error - Could not extract session ID from response: {session_data}")
+            await websocket.close()
+            return
+            
+        print(f"DEBUG: Using session_id = {session_id}")  # Debug log
         await websocket.send_text(f"System: Connected to Jules Session {session_id}")
+        
+        # Verify the session exists by fetching it
+        try:
+            session_check = await client.get_session(session_id)
+            print(f"DEBUG: Session check = {session_check}")
+        except Exception as check_err:
+            print(f"DEBUG: Could not verify session: {check_err}")
     except Exception as e:
         await websocket.send_text(f"System: Error creating session: {str(e)}")
         await websocket.close()
@@ -113,27 +154,61 @@ async def websocket_endpoint(websocket: WebSocket, source_id: str):
 
 def parse_activity(activity: Dict) -> str:
     """Converts a Jules Activity JSON into a readable string for the chat."""
-    originator = activity.get("originator", "unknown")
+    print(f"DEBUG parse_activity: {activity}")  # Debug log
     
-    if originator == "user":
+    # Get the actor/originator
+    actor = activity.get("actor") or activity.get("originator", "unknown")
+    
+    if actor == "user":
         # We might not want to echo user messages back if the UI already shows them
         return None 
     
-    # Handle Agent Activities
+    # Look for message content in various possible fields
+    # Jules API may use different field names for different activity types
+    
+    # Check for agentMessaged (agent sending a message)
+    if "agentMessaged" in activity:
+        msg = activity["agentMessaged"]
+        # The actual field name is 'agentMessage' (discovered from debug logs)
+        text = msg.get("agentMessage") or msg.get("text") or msg.get("message") or msg.get("content", "")
+        if text:
+            return f"Jules: {text}"
+    
+    # Check for sessionProgress (status updates like "Booting VM", "Cloning repo")
+    if "sessionProgress" in activity:
+        progress = activity["sessionProgress"]
+        status = progress.get("status") or progress.get("message", "")
+        return f"Jules: [Status] {status}"
+    
+    # Handle Plan Activities
     if "planGenerated" in activity:
-        steps = len(activity["planGenerated"]["plan"].get("steps", []))
-        return f"Jules: I have generated a plan with {steps} steps."
+        plan = activity["planGenerated"]
+        if isinstance(plan, dict) and "plan" in plan:
+            steps = len(plan["plan"].get("steps", []))
+            return f"Jules: I have generated a plan with {steps} steps."
+        return f"Jules: Plan generated"
     
     if "progressUpdated" in activity:
-        title = activity["progressUpdated"].get("title", "")
-        desc = activity["progressUpdated"].get("description", "")
-        return f"Jules: {title}\n{desc}"
+        progress = activity["progressUpdated"]
+        title = progress.get("title", "")
+        desc = progress.get("description", "")
+        return f"Jules: {title}\n{desc}" if title or desc else None
     
-    if "text" in activity: # In case of simple text response (mock or future API)
+    # Check for generic description field
+    if "description" in activity:
+        return f"Jules: {activity['description']}"
+    
+    # Check for text field
+    if "text" in activity:
         return f"Jules: {activity['text']}"
-
-    # Default fallback
-    return f"Jules: [Activity: {activity.get('name')}]"
+    
+    # Check for message field
+    if "message" in activity:
+        return f"Jules: {activity['message']}"
+    
+    # Default fallback - show activity name/type
+    name = activity.get("name", "unknown")
+    return f"Jules: [Activity: {name}]"
 
 if __name__ == "__main__":
     # Attempt to start ngrok for easier mobile testing

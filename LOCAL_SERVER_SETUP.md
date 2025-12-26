@@ -22,7 +22,7 @@ The best way to run a Python script as a service on Windows is using **Task Sche
 2.  Find the file **`start_server.bat`**.
 3.  Right-click it and select **Edit** (using Notepad or any text editor).
 4.  Update the lines under `:: CONFIGURATION SECTION`:
-    *   `set GOOGLE_API_KEY=...`: Paste your actual key.
+    *   `set JULES_API_KEY=...`: Paste your actual key.
     *   `cd /d ...`: Paste the full path to the `mobile_jules/server` folder on your computer.
 5.  Save the file.
 6.  **Test it** by double-clicking it to make sure the server starts.
@@ -52,7 +52,7 @@ On macOS, we use `launchd` to create a background service.
 2.  Open it with a text editor.
 3.  Edit the values inside `<string>...</string>` tags:
     *   **WorkingDirectory**: Set the full path to `mobile_jules/server`.
-    *   **GOOGLE_API_KEY**: Set your actual key.
+    *   **JULES_API_KEY**: Set your actual key.
     *   **ProgramArguments** (Optional): If you installed Python via Homebrew/Conda, update `/usr/bin/python3` to your specific python path (run `which python3` in terminal to find it).
 4.  Copy the file to your LaunchAgents folder:
     ```bash
@@ -82,7 +82,7 @@ On Linux, we use `systemd`.
 3.  Edit the `CONFIGURATION SECTION`:
     *   **User**: Set to your Linux username.
     *   **WorkingDirectory**: Set the full path to `mobile_jules/server`.
-    *   **GOOGLE_API_KEY**: Set your actual key.
+    *   **JULES_API_KEY**: Set your actual key.
 4.  Copy it to the system folder:
     ```bash
     sudo cp mobile_jules/server/jules-server.service /etc/systemd/system/

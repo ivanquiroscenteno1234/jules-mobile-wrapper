@@ -14,7 +14,7 @@ User=YOUR_USERNAME
 WorkingDirectory=/home/YOUR_USERNAME/path/to/jules-mobile-wrapper/mobile_jules/server
 
 # 3. Environment Variables
-Environment="GOOGLE_API_KEY=your_actual_jules_api_key"
+Environment="JULES_API_KEY=your_actual_jules_api_key"
 Environment="PYTHONPATH=.."
 
 # 4. Command to run (verify path to python3 with 'which python3')
