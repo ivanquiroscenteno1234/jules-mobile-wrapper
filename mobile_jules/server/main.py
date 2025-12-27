@@ -149,23 +149,31 @@ async def approve_plan(session_id: str):
 async def delete_session(session_id: str):
     """Deletes a session from Jules."""
     try:
+        # Ensure session_id has correct format (sessions/ID)
+        if not session_id.startswith("sessions/"):
+            session_id = f"sessions/{session_id}"
+        
         # Call Jules API to delete the session
         url = f"{JULES_API_BASE}/{session_id}"
+        print(f"DEBUG delete_session: calling DELETE {url}", flush=True)
         async with httpx.AsyncClient() as http_client:
             response = await http_client.delete(
                 url,
                 headers={"x-goog-api-key": JULES_API_KEY}
             )
+            print(f"DEBUG delete_session: response status={response.status_code}", flush=True)
             if response.status_code == 200 or response.status_code == 204:
                 # Also clean up any stored session data
                 if session_id in completed_session_data:
                     del completed_session_data[session_id]
                 return {"success": True, "message": "Session deleted"}
             else:
+                print(f"DEBUG delete_session error: {response.text}", flush=True)
                 raise HTTPException(status_code=response.status_code, detail=response.text)
     except HTTPException:
         raise
     except Exception as e:
+        print(f"DEBUG delete_session exception: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/sessions/{session_id:path}/publish")
@@ -485,8 +493,8 @@ async def _handle_websocket(
             # IMPORTANT: Immediately fetch and send latest activities (history)
             print(f"DEBUG: Loading session history...", flush=True)
             try:
-                # Fetch all activities and get the most recent 100
-                activities = await client.list_activities(session_id, page_size=100, get_latest=True)
+                # Fetch ALL activities for the session
+                activities = await client.list_activities(session_id, page_size=100, get_all=True)
                 print(f"DEBUG: Found {len(activities)} historical activities", flush=True)
                 
                 # Send activities in order (already chronological - oldest first for display)

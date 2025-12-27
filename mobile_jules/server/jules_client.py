@@ -61,10 +61,13 @@ class JulesClient:
             payload["title"] = title
         
         if source_id:
-            # Repo-based session
-            payload["sourceContext"] = {"source": source_id}
-            if starting_branch:
-                payload["sourceContext"]["githubRepoContext"] = {"startingBranch": starting_branch}
+            # Repo-based session - ALWAYS include githubRepoContext with startingBranch
+            payload["sourceContext"] = {
+                "source": source_id,
+                "githubRepoContext": {
+                    "startingBranch": starting_branch or "main"
+                }
+            }
             if auto_mode:
                 payload["automationMode"] = "AUTO_CREATE_PR"
                 payload["requirePlanApproval"] = False
@@ -111,13 +114,13 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def list_activities(self, session_id: str, page_size: int = 30, get_latest: bool = False) -> List[Dict]:
+    async def list_activities(self, session_id: str, page_size: int = 100, get_all: bool = False) -> List[Dict]:
         """Fetches the history of the session (user messages, agent plans/responses).
         
         Args:
             session_id: The session ID
             page_size: Number of activities per request (max 100)
-            get_latest: If True, fetches all pages and returns the most recent activities
+            get_all: If True, fetches ALL pages and returns all activities
         """
         url = f"{self.base_url}/{session_id}/activities"
         all_activities = []
@@ -143,15 +146,13 @@ class JulesClient:
                 
                 # Check for more pages
                 page_token = data.get("nextPageToken")
-                if not page_token or not get_latest:
-                    # If not getting latest, just return first page
+                if not page_token or not get_all:
+                    # If not getting all, just return first page
                     break
                     
             print(f"DEBUG list_activities: fetched {len(all_activities)} activities total")
             
-            if get_latest and len(all_activities) > page_size:
-                # Return only the most recent activities
-                return all_activities[-page_size:]
+            # Return ALL activities in chronological order
             return all_activities
 
     async def approve_plan(self, session_id: str) -> Dict:
