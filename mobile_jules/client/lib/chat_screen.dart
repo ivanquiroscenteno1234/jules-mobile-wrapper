@@ -116,7 +116,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late WebSocketChannel _channel;
@@ -146,8 +146,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isRecording = false;
   bool _isTranscribing = false;
 
+  // UX Improvements
+  String? _currentProgressTitle;
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _audioRecorder.dispose();
     _controller.dispose();
     _scrollController.dispose();
@@ -158,7 +162,19 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _connect();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Reconnect if connection was lost while in background
+      if (!_isConnected) {
+        debugPrint('App resumed, reconnecting WebSocket...');
+        _connect();
+      }
+    }
   }
 
   void _connect() async {
@@ -243,14 +259,19 @@ class _ChatScreenState extends State<ChatScreen> {
               } else if (chatMsg.type == 'failed') {
                 _sessionState = 'FAILED';
               }
-              // Track pending plan for approval
+               // Track pending plan for approval
               if (chatMsg.type == 'plan' && chatMsg.planId != null) {
                 _pendingPlanId = chatMsg.planId;
               }
               
-              // Clear pending plan if session is completed
-              if (chatMsg.type == 'completed') {
+              // Clear pending plan if session is completed or approved
+              if (chatMsg.type == 'completed' || chatMsg.type == 'plan_approved') {
                 _pendingPlanId = null;
+              }
+
+              // Update progress title
+              if (chatMsg.type == 'progress') {
+                _currentProgressTitle = chatMsg.content;
               }
               
               // Only stop waiting on completion events or when Jules needs input
@@ -849,6 +870,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    minLines: 1,
+                    maxLines: 5,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
                     decoration: const InputDecoration(
                       hintText: 'Ask Jules something...',
                       border: OutlineInputBorder(),
@@ -1652,24 +1677,28 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.code, size: 20, color: Colors.deepPurple),
-            const SizedBox(width: 8),
-            Text(
-              'Working',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: isDark ? Colors.white : Colors.black87),
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
+              ),
             ),
-            const SizedBox(width: 8),
-            _buildAnimatedDots(),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _currentProgressTitle ?? 'Jules is working...',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildAnimatedDots() {
-    return const SizedBox(
-      width: 24,
-      child: Text('•••', style: TextStyle(fontSize: 16, letterSpacing: 2)),
     );
   }
 }

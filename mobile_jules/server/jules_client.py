@@ -54,7 +54,6 @@ class JulesClient:
         """
         payload = {
             "prompt": prompt,
-            "sourceContext": {},
             "requirePlanApproval": True
         }
         
@@ -63,22 +62,23 @@ class JulesClient:
         
         if source_id:
             # Repo-based session
-            payload["sourceContext"]["source"] = source_id
+            payload["sourceContext"] = {"source": source_id}
             if starting_branch:
                 payload["sourceContext"]["githubRepoContext"] = {"startingBranch": starting_branch}
             if auto_mode:
                 payload["automationMode"] = "AUTO_CREATE_PR"
                 payload["requirePlanApproval"] = False
-        else:
-            # Repoless session - no automation possible
-            payload["automationMode"] = "NONE"
+        # For repoless sessions, omit sourceContext entirely
             
+        print(f"DEBUG create_session payload: {payload}", flush=True)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.base_url}/sessions",
                 headers=self.headers,
                 json=payload
             )
+            if not resp.is_success:
+                print(f"DEBUG create_session error {resp.status_code}: {resp.text}", flush=True)
             resp.raise_for_status()
             return resp.json()
 
