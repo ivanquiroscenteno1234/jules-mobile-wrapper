@@ -1,0 +1,49 @@
+# ===== Root .gitignore for mobile_jules =====
+
+# Environment and secrets
+.env
+*.env
+set_env.bat
+!set_env.bat.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.log
+
+# Chrome DevTools cache (CRITICAL - contains sensitive data!)
+**/chrome-device/
+**/Default/
+**/*.dill
+**/*.track.dill
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.class
+*.swp
+
+# Node (if any)
+node_modules/
