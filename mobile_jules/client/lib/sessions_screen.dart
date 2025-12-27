@@ -138,6 +138,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
     try {
       final response = await http.get(
         Uri.parse('${AppConfig.serverUrl}/sessions'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
       );
 
       if (response.statusCode == 200) {
@@ -181,6 +182,59 @@ class _SessionsScreenState extends State<SessionsScreen> {
     final uri = Uri.parse(pr.url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<bool> _deleteSession(Session session) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Session?'),
+        content: Text('Are you sure you want to delete "${session.displayTitle}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed != true) return false;
+    
+    try {
+      final response = await http.delete(
+        Uri.parse('${AppConfig.serverUrl}/sessions/${session.id}'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
+      
+      if (response.statusCode == 200) {
+        // Remove from local list
+        setState(() {
+          sessions.removeWhere((s) => s.id == session.id);
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Session deleted')),
+          );
+        }
+        return true;
+      } else {
+        throw Exception('Failed to delete session');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+      return false;
     }
   }
 
@@ -305,52 +359,73 @@ class _SessionsScreenState extends State<SessionsScreen> {
                         itemCount: sessions.length,
                         itemBuilder: (context, index) {
                           final session = sessions[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
+                          return Dismissible(
+                            key: Key(session.id),
+                            direction: DismissDirection.endToStart,
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 20),
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
                             ),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: session.statusColor.withOpacity(0.2),
-                                child: Icon(
-                                  session.statusIcon,
-                                  color: session.statusColor,
-                                ),
+                            confirmDismiss: (direction) => _deleteSession(session),
+                            child: Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
                               ),
-                              title: Text(
-                                session.displayTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Row(
-                                children: [
-                                  Text(
-                                    session.statusText,
-                                    style: TextStyle(color: session.statusColor),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: session.statusColor.withOpacity(0.2),
+                                  child: Icon(
+                                    session.statusIcon,
+                                    color: session.statusColor,
                                   ),
-                                  if (session.hasPR) ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.green[100],
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.merge, size: 12, color: Colors.green),
-                                          SizedBox(width: 2),
-                                          Text('PR', style: TextStyle(fontSize: 10, color: Colors.green)),
-                                        ],
-                                      ),
+                                ),
+                                title: Text(
+                                  session.displayTitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Row(
+                                  children: [
+                                    Text(
+                                      session.statusText,
+                                      style: TextStyle(color: session.statusColor),
                                     ),
+                                    if (session.hasPR) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green[100],
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.merge, size: 12, color: Colors.green),
+                                            SizedBox(width: 2),
+                                            Text('PR', style: TextStyle(fontSize: 10, color: Colors.green)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ],
-                                ],
+                                ),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => _showSessionDetails(session),
                               ),
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () => _showSessionDetails(session),
                             ),
                           );
                         },

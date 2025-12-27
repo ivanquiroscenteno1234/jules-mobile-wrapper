@@ -127,6 +127,29 @@ async def approve_plan(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/sessions/{session_id:path}")
+async def delete_session(session_id: str):
+    """Deletes a session from Jules."""
+    try:
+        # Call Jules API to delete the session
+        url = f"{JULES_API_BASE}/{session_id}"
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.delete(
+                url,
+                headers={"x-goog-api-key": JULES_API_KEY}
+            )
+            if response.status_code == 200 or response.status_code == 204:
+                # Also clean up any stored session data
+                if session_id in completed_session_data:
+                    del completed_session_data[session_id]
+                return {"success": True, "message": "Session deleted"}
+            else:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/sessions/{session_id:path}/publish")
 async def publish_branch(session_id: str, create_pr: bool = Query(False)):
     """Publishes the branch (and optionally creates a PR) for a completed session.
@@ -140,6 +163,30 @@ async def publish_branch(session_id: str, create_pr: bool = Query(False)):
         return {"success": True, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sessions/{session_id}/patch")
+async def get_session_patch(session_id: str):
+    """Returns the patch content for a session (for copying to clipboard).
+    
+    Args:
+        session_id: The session ID
+    """
+    # Check if we have stored patch data for this session
+    if session_id in completed_session_data:
+        data = completed_session_data[session_id]
+        patch = data.get("patch", "")
+        commit_message = data.get("commit_message", "Changes from Jules")
+        return {
+            "success": True,
+            "patch": patch,
+            "commitMessage": commit_message,
+            "instructions": f"# Apply this patch locally:\n# Save the patch to a file and run:\n# git apply patch.diff\n\n{patch}"
+        }
+    else:
+        raise HTTPException(
+            status_code=404, 
+            detail="Patch data not found. Session may not have completed or page was refreshed."
+        )
 
 @app.get("/repos/{owner}/{repo}/branches")
 async def list_repo_branches(owner: str, repo: str):

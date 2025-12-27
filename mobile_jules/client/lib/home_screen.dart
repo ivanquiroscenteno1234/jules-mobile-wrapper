@@ -28,7 +28,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> fetchRepos() async {
     try {
-      final response = await http.get(Uri.parse('${AppConfig.serverUrl}/repos'));
+      final response = await http.get(
+        Uri.parse('${AppConfig.serverUrl}/repos'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
 
       if (response.statusCode == 200) {
         setState(() {

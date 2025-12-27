@@ -39,7 +39,8 @@ class JulesClient:
         self, 
         source_id: str, 
         prompt: str = "Start session",
-        auto_mode: bool = False
+        auto_mode: bool = False,
+        starting_branch: str = None
     ) -> Dict:
         """Creates a new chat session.
         
@@ -47,14 +48,17 @@ class JulesClient:
             source_id: The source (repo) to work with
             prompt: Initial task description
             auto_mode: If True, auto-approve plans and auto-create PRs (DEFAULT: False)
+            starting_branch: Optional branch to start from (defaults to repo's default branch)
         """
+        github_context = {}
+        if starting_branch:
+            github_context["startingBranch"] = starting_branch
+            
         payload = {
             "prompt": prompt,
             "sourceContext": {
                 "source": source_id,
-                "githubRepoContext": {
-                    # Omit startingBranch to let Jules use the repo's default branch
-                }
+                "githubRepoContext": github_context
             },
         }
         

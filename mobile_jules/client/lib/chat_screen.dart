@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
@@ -126,6 +127,9 @@ class _ChatScreenState extends State<ChatScreen> {
   List<String> _availableBranches = [];
   String _selectedBranch = 'main';
   bool _isLoadingBranches = false;
+  
+  // Session state tracking
+  String _sessionState = 'UNKNOWN'; // QUEUED, PLANNING, AWAITING_PLAN_APPROVAL, IN_PROGRESS, COMPLETED, FAILED
 
   @override
   void initState() {
@@ -175,6 +179,20 @@ class _ChatScreenState extends State<ChatScreen> {
                 _currentSessionId = json['sessionId'];
               }
               
+              // Track session state
+              if (json['sessionState'] != null) {
+                _sessionState = json['sessionState'];
+              }
+              // Infer state from message types
+              if (chatMsg.type == 'plan') {
+                _sessionState = 'AWAITING_PLAN_APPROVAL';
+              } else if (chatMsg.type == 'progress' || chatMsg.type == 'artifact') {
+                _sessionState = 'IN_PROGRESS';
+              } else if (chatMsg.type == 'completed') {
+                _sessionState = 'COMPLETED';
+              } else if (chatMsg.type == 'failed') {
+                _sessionState = 'FAILED';
+              }
               // Track pending plan for approval
               if (chatMsg.type == 'plan' && chatMsg.planId != null) {
                 _pendingPlanId = chatMsg.planId;
@@ -300,6 +318,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final response = await http.get(
         Uri.parse('${AppConfig.serverUrl}/repos/$owner/$repo/branches'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
       );
       
       if (response.statusCode == 200) {
@@ -347,7 +366,10 @@ class _ChatScreenState extends State<ChatScreen> {
             'branch_only': branchOnly.toString(),
           });
       
-      final response = await http.post(uri);
+      final response = await http.post(
+        uri,
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -386,11 +408,110 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _copyPatch(String sessionId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConfig.serverUrl}/sessions/$sessionId/patch'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final patchContent = data['instructions'] ?? data['patch'] ?? '';
+        
+        await Clipboard.setData(ClipboardData(text: patchContent));
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Patch copied to clipboard! Use \'git apply patch.diff\' to apply.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        throw Exception('Patch not found');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error copying patch: $e')),
+        );
+      }
+    }
+  }
+
+  Widget _buildSessionStateBadge() {
+    Color bgColor;
+    Color textColor = Colors.white;
+    String label;
+    
+    switch (_sessionState) {
+      case 'QUEUED':
+        bgColor = Colors.grey;
+        label = 'Queued';
+        break;
+      case 'PLANNING':
+        bgColor = Colors.orange;
+        label = 'Planning';
+        break;
+      case 'AWAITING_PLAN_APPROVAL':
+        bgColor = Colors.amber;
+        textColor = Colors.black87;
+        label = 'Awaiting Approval';
+        break;
+      case 'AWAITING_USER_FEEDBACK':
+        bgColor = Colors.purple;
+        label = 'Needs Input';
+        break;
+      case 'IN_PROGRESS':
+        bgColor = Colors.blue;
+        label = 'Working';
+        break;
+      case 'PAUSED':
+        bgColor = Colors.grey.shade600;
+        label = 'Paused';
+        break;
+      case 'COMPLETED':
+        bgColor = Colors.green;
+        label = 'Completed';
+        break;
+      case 'FAILED':
+        bgColor = Colors.red;
+        label = 'Failed';
+        break;
+      default:
+        bgColor = Colors.grey.shade400;
+        label = _isConnected ? 'Connected' : 'Connecting...';
+    }
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.repoName),
+        title: Row(
+          children: [
+            Expanded(child: Text(widget.repoName)),
+            _buildSessionStateBadge(),
+          ],
+        ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: Column(
@@ -733,8 +854,11 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildBashOutputCard(Map<String, dynamic> artifact) {
     final command = artifact['command'] ?? '';
     final output = artifact['output'] ?? '';
+    final exitCode = artifact['exitCode'];
     
     if (command.isEmpty && output.isEmpty) return const SizedBox.shrink();
+    
+    final isSuccess = exitCode == null || exitCode == 0;
     
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -763,6 +887,34 @@ class _ChatScreenState extends State<ChatScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                // Exit code badge
+                if (exitCode != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isSuccess ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isSuccess ? Icons.check_circle : Icons.error,
+                          size: 12,
+                          color: isSuccess ? Colors.green : Colors.red,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'exit $exitCode',
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 10,
+                            color: isSuccess ? Colors.green : Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           if (output.isNotEmpty) ...[
@@ -1095,6 +1247,19 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // Copy Patch button
+                if (sessionId != null)
+                  OutlinedButton.icon(
+                    onPressed: () => _copyPatch(sessionId),
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Copy Patch to Clipboard'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.grey[700],
+                      minimumSize: const Size(double.infinity, 40),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
               ] else if (julesUrl != null) ...[
                 // Fallback - open Jules Web
                 ElevatedButton.icon(

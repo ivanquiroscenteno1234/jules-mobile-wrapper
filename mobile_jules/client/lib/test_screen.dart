@@ -44,7 +44,10 @@ class _TestScreenState extends State<TestScreen> {
     try {
       final response = await http.post(
         Uri.parse('${AppConfig.serverUrl}/test/start'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
         body: json.encode({
           'url': _urlController.text,
           'objective': _objectiveController.text,
@@ -78,6 +81,7 @@ class _TestScreenState extends State<TestScreen> {
     try {
       final response = await http.get(
         Uri.parse('${AppConfig.serverUrl}/test/status/$_testId'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
       );
 
       if (response.statusCode == 200) {
