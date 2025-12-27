@@ -37,6 +37,12 @@ A mobile companion app for **Jules** (Google's AI coding agent) that lets you ma
 - **Confirmation Dialog** - Prevents accidental deletions
 - **Synced with API** - Deletes from both local list and Jules backend
 
+### 📂 GitHub Repository Management
+- **Create Repos** - Create new GitHub repos from repoless sessions
+- **List Repos** - View all your GitHub repositories
+- **Delete Repos** - Swipe to delete repos (with confirmation)
+- **Open in Browser** - Quick link to repo on GitHub
+
 ### ⚙️ Settings
 - **Server URL Configuration** - Connect to your local or remote proxy server
 - **Dark Mode** - Toggle between light and dark themes

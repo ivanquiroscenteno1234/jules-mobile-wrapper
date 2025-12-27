@@ -553,6 +553,146 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _showCreateRepoDialog() {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController descController = TextEditingController();
+    bool isPrivate = false;
+    bool isCreating = false;
+    String? errorMessage;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.add_box_outlined, color: Colors.deepPurple),
+              SizedBox(width: 8),
+              Text('Create GitHub Repository'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Repository Name', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    hintText: 'my-new-project',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 16),
+                const Text('Description (optional)', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: descController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    hintText: 'A brief description of the project',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Private Repository'),
+                  subtitle: Text(
+                    isPrivate ? 'Only you can see this repository' : 'Anyone can see this repository',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  value: isPrivate,
+                  onChanged: (value) => setDialogState(() => isPrivate = value),
+                  activeColor: Colors.deepPurple,
+                ),
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(errorMessage!, style: const TextStyle(color: Colors.red)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isCreating ? null : () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: (nameController.text.trim().isEmpty || isCreating)
+                ? null
+                : () async {
+                    setDialogState(() {
+                      isCreating = true;
+                      errorMessage = null;
+                    });
+                    
+                    try {
+                      final response = await http.post(
+                        Uri.parse('${AppConfig.serverUrl}/github/repos'),
+                        headers: {
+                          'ngrok-skip-browser-warning': 'true',
+                          'Content-Type': 'application/json',
+                        },
+                        body: jsonEncode({
+                          'name': nameController.text.trim(),
+                          'description': descController.text.trim(),
+                          'private': isPrivate,
+                        }),
+                      );
+                      
+                      if (response.statusCode == 200) {
+                        final data = jsonDecode(response.body);
+                        Navigator.pop(dialogContext);
+                        
+                        // Show success message with repo URL
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Repository "${data['name']}" created!'),
+                              action: SnackBarAction(
+                                label: 'Open',
+                                onPressed: () async {
+                                  final uri = Uri.parse(data['html_url']);
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                  }
+                                },
+                              ),
+                              duration: const Duration(seconds: 5),
+                            ),
+                          );
+                        }
+                      } else {
+                        final errorData = jsonDecode(response.body);
+                        setDialogState(() {
+                          isCreating = false;
+                          errorMessage = errorData['detail'] ?? 'Failed to create repository';
+                        });
+                      }
+                    } catch (e) {
+                      setDialogState(() {
+                        isCreating = false;
+                        errorMessage = 'Error: $e';
+                      });
+                    }
+                  },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+              ),
+              child: isCreating 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSessionStateBadge() {
     Color bgColor;
     Color textColor = Colors.white;
@@ -625,6 +765,15 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          // Show "Create Repo" button only for repoless sessions
+          if (widget.sourceId == null || widget.sourceId!.isEmpty)
+            IconButton(
+              icon: const Icon(Icons.add_box_outlined),
+              tooltip: 'Create GitHub Repository',
+              onPressed: _showCreateRepoDialog,
+            ),
+        ],
       ),
       body: Column(
         children: [

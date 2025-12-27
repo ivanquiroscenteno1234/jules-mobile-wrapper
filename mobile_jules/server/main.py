@@ -222,6 +222,82 @@ async def list_repo_branches(owner: str, repo: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ===== GitHub Repo Management Endpoints =====
+
+class CreateRepoRequest(BaseModel):
+    name: str
+    description: str = ""
+    private: bool = False
+
+@app.post("/github/repos")
+async def create_github_repo(request: CreateRepoRequest):
+    """Create a new GitHub repository for the authenticated user."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured. Cannot create repositories."
+        )
+    
+    try:
+        repo = await github_client.create_repository(
+            name=request.name,
+            description=request.description,
+            private=request.private,
+            auto_init=True  # Always create with README
+        )
+        return {
+            "success": True,
+            "name": repo["name"],
+            "full_name": repo["full_name"],
+            "html_url": repo["html_url"],
+            "clone_url": repo["clone_url"],
+            "private": repo["private"]
+        }
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 422:
+            raise HTTPException(status_code=422, detail="Repository name already exists or is invalid")
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/github/repos")
+async def list_github_repos():
+    """List GitHub repositories for the authenticated user."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured."
+        )
+    
+    try:
+        repos = await github_client.list_user_repos(per_page=50)
+        return {"repos": repos}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/github/repos/{owner}/{repo}")
+async def delete_github_repo(owner: str, repo: str):
+    """Delete a GitHub repository. Requires delete_repo scope on token."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured."
+        )
+    
+    try:
+        success = await github_client.delete_repository(owner, repo)
+        if success:
+            return {"success": True, "message": f"Repository {owner}/{repo} deleted"}
+        else:
+            raise HTTPException(status_code=404, detail="Repository not found or permission denied")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/sessions/{session_id:path}/github-pr")
 async def create_github_pr(
     session_id: str,

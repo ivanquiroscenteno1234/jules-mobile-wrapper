@@ -5,6 +5,7 @@ import 'config.dart';
 import 'chat_screen.dart';
 import 'sessions_screen.dart';
 import 'dashboard_screen.dart';
+import 'github_repos_screen.dart';
 import 'main.dart';
 import 'test_screen.dart';
 
@@ -86,6 +87,16 @@ class _HomeScreenState extends State<HomeScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const SessionsScreen()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.folder_copy_outlined),
+            tooltip: 'GitHub Repos',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const GitHubReposScreen()),
               );
             },
           ),
