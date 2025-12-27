@@ -1,22 +1,25 @@
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file if it exists
+
 import os
 import json
 import asyncio
 import uuid
 from typing import List, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
+import google.generativeai as genai
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
 # Import the Client
-from jules_client import JulesClient, MockJulesClient
+from jules_client import JulesClient
 from notifications import notification_service, SessionPoller
 from tester_agent import tester_agent
 from github_client import get_github_client
 
 app = FastAPI()
-
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,16 +30,31 @@ app.add_middleware(
 
 # Configuration
 API_KEY = os.environ.get("JULES_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Initialize Gemini for STT
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("WARNING: GEMINI_API_KEY not set. Speech-to-Text will not work.")
 
 # Choose client based on environment
 if API_KEY:
     client = JulesClient(api_key=API_KEY)
 else:
-    print("WARNING: No JULES_API_KEY found. Using MockJulesClient.")
-    client = MockJulesClient(api_key="dummy")
+    print("ERROR: JULES_API_KEY is required. Please set it in your environment.")
+    print("Example: $env:JULES_API_KEY = 'your_api_key'")
+    import sys
+    sys.exit(1)
 
 # Session poller for notifications
 session_poller = SessionPoller(client, notification_service)
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the session polling background task."""
+    asyncio.create_task(session_poller.start_polling(interval_seconds=30))
+    print("Session Poller started.")
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
@@ -286,12 +304,46 @@ async def create_github_pr(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.websocket("/chat/{source_id:path}") # :path allows slashes in source_id
+# Repoless WebSocket endpoint - no source_id required
+@app.websocket("/chat")
+async def websocket_repoless_endpoint(
+    websocket: WebSocket, 
+    session_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None)
+):
+    """WebSocket endpoint for repoless sessions (No Codebase mode)."""
+    await _handle_websocket(
+        websocket=websocket,
+        source_id=None,  # Repoless
+        session_id=session_id,
+        auto_mode=False,  # Repoless sessions don't support auto-PR
+        user_id=user_id
+    )
+
+# Repo-based WebSocket endpoint
+@app.websocket("/chat/{source_id:path}")
 async def websocket_endpoint(
     websocket: WebSocket, 
     source_id: str, 
-    session_id: Optional[str] = Query(None),  # For reconnecting to existing session
-    auto_mode: bool = Query(False)  # Auto-approve plans and create PRs
+    session_id: Optional[str] = Query(None),
+    auto_mode: bool = Query(False),
+    user_id: Optional[str] = Query(None)
+):
+    """WebSocket endpoint for repo-based sessions."""
+    await _handle_websocket(
+        websocket=websocket,
+        source_id=source_id,
+        session_id=session_id,
+        auto_mode=auto_mode,
+        user_id=user_id
+    )
+
+async def _handle_websocket(
+    websocket: WebSocket, 
+    source_id: Optional[str],  # None for repoless
+    session_id: Optional[str] = None,
+    auto_mode: bool = False,
+    user_id: Optional[str] = None
 ):
     await websocket.accept()
     
@@ -335,6 +387,11 @@ async def websocket_endpoint(
             session_data = await client.get_session(session_id)
             active_session_id = session_id
             
+            # Link session with user for notifications
+            if user_id:
+                session_poller.track_session(user_id, session_id)
+                print(f"Tracking reconnecting session {session_id} for user {user_id}")
+            
             # Debug: Check what's in session_data
             print(f"DEBUG: session_data keys: {list(session_data.keys()) if session_data else 'None'}", flush=True)
             if session_data and "outputs" in session_data:
@@ -349,13 +406,14 @@ async def websocket_endpoint(
                 "sessionId": session_id
             })
             
-            # IMPORTANT: Immediately fetch and send ALL existing activities (history)
+            # IMPORTANT: Immediately fetch and send latest activities (history)
             print(f"DEBUG: Loading session history...", flush=True)
             try:
-                activities = await client.list_activities(session_id, page_size=100)
+                # Fetch all activities and get the most recent 100
+                activities = await client.list_activities(session_id, page_size=100, get_latest=True)
                 print(f"DEBUG: Found {len(activities)} historical activities", flush=True)
                 
-                # Send activities in order (oldest first for proper display)
+                # Send activities in order (already chronological - oldest first for display)
                 for activity in activities:
                     act_id = activity.get("id") or activity.get("name")
                     if act_id:
@@ -366,7 +424,7 @@ async def websocket_endpoint(
                 
                 await websocket.send_json({
                     "type": "system",
-                    "content": f"Loaded {len(activities)} previous activities"
+                    "content": f"Loaded {len(activities)} recent activities"
                 })
             except Exception as e:
                 print(f"Error loading history: {e}")
@@ -422,6 +480,11 @@ async def websocket_endpoint(
                     if not active_session_id:
                         await websocket.send_json({"type": "error", "content": "Could not create session"})
                         continue
+                    
+                    # Track new session for notifications
+                    if user_id:
+                        session_poller.track_session(user_id, active_session_id)
+                        print(f"Tracking new session {active_session_id} for user {user_id}")
                     
                     # Send confirmation
                     await websocket.send_json({
@@ -853,3 +916,50 @@ async def get_test_status(test_id: str):
 async def list_tests():
     """List all tests."""
     return [tester_agent.to_json(t) for t in tester_agent.tests.values()]
+
+# ===== Speech to Text Endpoints =====
+
+@app.post("/stt")
+async def speech_to_text(file: UploadFile = File(...)):
+    """Transcribe an audio file using Gemini 3 Flash with thinking."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server")
+    
+    try:
+        # Save temporary file
+        temp_filename = f"temp_{uuid.uuid4()}.{file.filename.split('.')[-1]}"
+        with open(temp_filename, "wb") as buffer:
+            buffer.write(await file.read())
+        
+        # Using Gemini 3 Flash with thinking_level="medium"
+        # Requires google-genai >= 1.51.0
+        from google import genai
+        from google.genai import types
+        
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        # Upload file to Gemini
+        myfile = client.files.upload(file=temp_filename)
+        
+        # Generate transcription with medium thinking level
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[
+                "Transcribe this audio accurately. Only return the transcribed text, nothing else.",
+                myfile
+            ],
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(thinking_level="medium")
+            )
+        )
+        
+        # Cleanup
+        os.remove(temp_filename)
+        
+        return {"text": response.text.strip()}
+    
+    except Exception as e:
+        print(f"STT Error: {e}")
+        if 'temp_filename' in locals() and os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")

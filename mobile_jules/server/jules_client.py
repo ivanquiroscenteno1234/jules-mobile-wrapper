@@ -37,36 +37,41 @@ class JulesClient:
 
     async def create_session(
         self, 
-        source_id: str, 
+        source_id: str = None,  # Now optional for repoless sessions
         prompt: str = "Start session",
         auto_mode: bool = False,
-        starting_branch: str = None
+        starting_branch: str = None,
+        title: str = None
     ) -> Dict:
         """Creates a new chat session.
         
         Args:
-            source_id: The source (repo) to work with
+            source_id: The source (repo) to work with. If None, creates a repoless session.
             prompt: Initial task description
-            auto_mode: If True, auto-approve plans and auto-create PRs (DEFAULT: False)
-            starting_branch: Optional branch to start from (defaults to repo's default branch)
+            auto_mode: If True, auto-approve plans and auto-create PRs (only for repo sessions)
+            starting_branch: Optional branch to start from (only for repo sessions)
+            title: Optional title for the session
         """
-        github_context = {}
-        if starting_branch:
-            github_context["startingBranch"] = starting_branch
-            
         payload = {
             "prompt": prompt,
-            "sourceContext": {
-                "source": source_id,
-                "githubRepoContext": github_context
-            },
+            "sourceContext": {},
+            "requirePlanApproval": True
         }
         
-        if auto_mode:
-            payload["automationMode"] = "AUTO_CREATE_PR"
-            payload["requirePlanApproval"] = False
+        if title:
+            payload["title"] = title
+        
+        if source_id:
+            # Repo-based session
+            payload["sourceContext"]["source"] = source_id
+            if starting_branch:
+                payload["sourceContext"]["githubRepoContext"] = {"startingBranch": starting_branch}
+            if auto_mode:
+                payload["automationMode"] = "AUTO_CREATE_PR"
+                payload["requirePlanApproval"] = False
         else:
-            payload["requirePlanApproval"] = True
+            # Repoless session - no automation possible
+            payload["automationMode"] = "NONE"
             
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -106,24 +111,48 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def list_activities(self, session_id: str, page_size: int = 30) -> List[Dict]:
-        """Fetches the history of the session (user messages, agent plans/responses)."""
+    async def list_activities(self, session_id: str, page_size: int = 30, get_latest: bool = False) -> List[Dict]:
+        """Fetches the history of the session (user messages, agent plans/responses).
+        
+        Args:
+            session_id: The session ID
+            page_size: Number of activities per request (max 100)
+            get_latest: If True, fetches all pages and returns the most recent activities
+        """
         url = f"{self.base_url}/{session_id}/activities"
-        params = {"pageSize": page_size}
+        all_activities = []
+        page_token = None
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                url,
-                headers=self.headers,
-                params=params
-            )
-            if not resp.is_success:
-                print(f"DEBUG list_activities error: {resp.status_code}")
-            resp.raise_for_status()
-            data = resp.json()
-            activities = data.get("activities", [])
-            print(f"DEBUG list_activities: fetched {len(activities)} activities")
-            return activities
+            while True:
+                params = {"pageSize": min(page_size, 100)}
+                if page_token:
+                    params["pageToken"] = page_token
+                    
+                resp = await client.get(
+                    url,
+                    headers=self.headers,
+                    params=params
+                )
+                if not resp.is_success:
+                    print(f"DEBUG list_activities error: {resp.status_code}")
+                resp.raise_for_status()
+                data = resp.json()
+                activities = data.get("activities", [])
+                all_activities.extend(activities)
+                
+                # Check for more pages
+                page_token = data.get("nextPageToken")
+                if not page_token or not get_latest:
+                    # If not getting latest, just return first page
+                    break
+                    
+            print(f"DEBUG list_activities: fetched {len(all_activities)} activities total")
+            
+            if get_latest and len(all_activities) > page_size:
+                # Return only the most recent activities
+                return all_activities[-page_size:]
+            return all_activities
 
     async def approve_plan(self, session_id: str) -> Dict:
         """Approves the current plan for a session."""

@@ -3,3 +3,7 @@ uvicorn
 pydantic
 pyngrok
 requests
+google-generativeai
+python-multipart
+httpx
+python-dotenv

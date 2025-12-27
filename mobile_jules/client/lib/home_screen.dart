@@ -212,6 +212,146 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showNewTaskDialog,
+        icon: const Icon(Icons.add),
+        label: const Text('New Task'),
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+      ),
+    );
+  }
+
+  void _showNewTaskDialog() {
+    final TextEditingController promptController = TextEditingController();
+    bool noCodebase = false;
+    bool autoCreatePR = false;  // Auto-create PR toggle
+    String? selectedRepoId;
+    String? selectedRepoName;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('New Task'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Task Prompt
+                const Text('What would you like Jules to do?', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: promptController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'e.g., Create a Flask app with user authentication...',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setDialogState(() {}),  // Rebuild to update button state
+                ),
+                const SizedBox(height: 16),
+                
+                // No Codebase Toggle
+                SwitchListTile(
+                  title: const Text('No Codebase'),
+                  subtitle: Text(
+                    noCodebase 
+                      ? 'Start from scratch (repoless mode)' 
+                      : 'Work on an existing repository',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  value: noCodebase,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      noCodebase = value;
+                      if (value) {
+                        selectedRepoId = null;
+                        selectedRepoName = null;
+                        autoCreatePR = false;  // Disable auto-PR for repoless
+                      }
+                    });
+                  },
+                  activeColor: Colors.deepPurple,
+                ),
+                
+                // Repo Selection (only if noCodebase is false)
+                if (!noCodebase) ...[
+                  const SizedBox(height: 8),
+                  const Text('Repository', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<String>(
+                    value: selectedRepoId,
+                    hint: const Text('Select a repository'),
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: repos.map((repo) => DropdownMenuItem<String>(
+                      value: repo['id'],
+                      child: Text(repo['full_name']),
+                    )).toList(),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        selectedRepoId = value;
+                        selectedRepoName = repos.firstWhere((r) => r['id'] == value)['name'];
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  // Auto-Create PR Toggle
+                  SwitchListTile(
+                    title: const Text('Auto-Create PR'),
+                    subtitle: Text(
+                      autoCreatePR 
+                        ? 'Automatically create a pull request when done' 
+                        : 'Manual PR creation after completion',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    value: autoCreatePR,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        autoCreatePR = value;
+                      });
+                    },
+                    activeColor: Colors.green,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: (promptController.text.trim().isEmpty || 
+                         (!noCodebase && selectedRepoId == null))
+                ? null
+                : () {
+                    Navigator.pop(dialogContext);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ChatScreen(
+                          repoName: noCodebase ? 'New Project' : (selectedRepoName ?? 'Project'),
+                          sourceId: noCodebase ? null : selectedRepoId,
+                          initialPrompt: promptController.text.trim(),
+                          autoMode: autoCreatePR,
+                        ),
+                      ),
+                    );
+                  },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Start'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

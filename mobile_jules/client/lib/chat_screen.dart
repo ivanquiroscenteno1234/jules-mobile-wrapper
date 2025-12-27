@@ -1,10 +1,16 @@
+import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
+import 'main.dart' show showNotification;
 
 class ChatMessage {
   final String id;
@@ -92,14 +98,18 @@ class PlanStep {
 
 class ChatScreen extends StatefulWidget {
   final String repoName;
-  final String sourceId;
+  final String? sourceId; // Nullable for repoless sessions
   final String? sessionId; // Optional for reconnecting
+  final String? initialPrompt; // Auto-send on connect
+  final bool autoMode; // Auto-create PR mode
 
   const ChatScreen({
     super.key, 
     required this.repoName, 
-    required this.sourceId,
+    this.sourceId,  // Now optional
     this.sessionId,
+    this.initialPrompt,
+    this.autoMode = false,
   });
 
   @override
@@ -131,15 +141,39 @@ class _ChatScreenState extends State<ChatScreen> {
   // Session state tracking
   String _sessionState = 'UNKNOWN'; // QUEUED, PLANNING, AWAITING_PLAN_APPROVAL, IN_PROGRESS, COMPLETED, FAILED
 
+  // Audio recording
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  bool _isTranscribing = false;
+
+  @override
+  void dispose() {
+    _audioRecorder.dispose();
+    _controller.dispose();
+    _scrollController.dispose();
+    _channel.sink.close();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
     _connect();
   }
 
-  void _connect() {
+  void _connect() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id');
+    
     final wsUrl = AppConfig.serverUrl.replaceFirst('http', 'ws');
-    String uri = '$wsUrl/chat/${widget.sourceId}';
+    
+    // Use repoless endpoint when no sourceId provided
+    String uri;
+    if (widget.sourceId != null && widget.sourceId!.isNotEmpty) {
+      uri = '$wsUrl/chat/${widget.sourceId}';
+    } else {
+      uri = '$wsUrl/chat';  // Repoless endpoint
+    }
     
     // Build query parameters
     final queryParams = <String, String>{};
@@ -148,8 +182,12 @@ class _ChatScreenState extends State<ChatScreen> {
       queryParams['session_id'] = widget.sessionId!;
     }
     
-    // Pass auto_mode setting
-    if (AppConfig.autoMode) {
+    if (userId != null) {
+      queryParams['user_id'] = userId;
+    }
+    
+    // Pass auto_mode setting (only for repo-based sessions)
+    if ((widget.autoMode || AppConfig.autoMode) && widget.sourceId != null) {
       queryParams['auto_mode'] = 'true';
     }
     
@@ -159,7 +197,19 @@ class _ChatScreenState extends State<ChatScreen> {
     
     try {
       _channel = WebSocketChannel.connect(Uri.parse(uri));
-      _isConnected = true;
+      setState(() {
+        _isConnected = true;
+      });
+      
+      // Auto-send initial prompt if provided
+      if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
+        // Small delay to ensure WebSocket is ready
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (_isConnected) {
+            _sendMessageText(widget.initialPrompt!);
+          }
+        });
+      }
       
       _channel.stream.listen(
         (message) {
@@ -273,27 +323,21 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  @override
-  void dispose() {
-    if (_isConnected) {
-      _channel.sink.close();
-    }
-    _controller.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
   void _sendMessage() {
     if (_controller.text.isNotEmpty && _isConnected) {
-      final text = _controller.text;
-      
+      _sendMessageText(_controller.text);
+      _controller.clear();
+    }
+  }
+  
+  void _sendMessageText(String text) {
+    if (text.isNotEmpty && _isConnected) {
       setState(() {
         _messages.add(ChatMessage.user(text));
         _isWaiting = true;
       });
       
       _channel.sink.add(text);
-      _controller.clear();
       _scrollToBottom();
     }
   }
@@ -441,6 +485,74 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _toggleRecording() async {
+    try {
+      if (_isRecording) {
+        final path = await _audioRecorder.stop();
+        setState(() => _isRecording = false);
+        if (path != null) {
+          _transcribeAudio(path);
+        }
+      } else {
+        if (await _audioRecorder.hasPermission()) {
+          final tempDir = await getTemporaryDirectory();
+          final path = p.join(tempDir.path, 'recording_${DateTime.now().millisecondsSinceEpoch}.m4a');
+          
+          const config = RecordConfig(); // Default config
+          await _audioRecorder.start(config, path: path);
+          setState(() => _isRecording = true);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Microphone permission denied')),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error toggling recording: $e');
+      setState(() => _isRecording = false);
+    }
+  }
+
+  Future<void> _transcribeAudio(String path) async {
+    setState(() => _isTranscribing = true);
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('${AppConfig.serverUrl}/stt'));
+      request.headers['ngrok-skip-browser-warning'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('file', path));
+
+      final response = await request.send();
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        final text = data['text'] ?? '';
+        
+        if (text.isNotEmpty) {
+          setState(() {
+            _controller.text = (_controller.text + ' ' + text).trim();
+          });
+        }
+      } else {
+        throw Exception('Transcription failed with status: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Transcription error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Speech to text failed: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isTranscribing = false);
+      // Delete temp file
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    }
+  }
+
   Widget _buildSessionStateBadge() {
     Color bgColor;
     Color textColor = Colors.white;
@@ -572,6 +684,19 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: _isRecording 
+                      ? const Icon(Icons.stop, color: Colors.red) 
+                      : _isTranscribing 
+                          ? const SizedBox(
+                              width: 20, 
+                              height: 20, 
+                              child: CircularProgressIndicator(strokeWidth: 2)
+                            )
+                          : const Icon(Icons.mic, color: Colors.deepPurple),
+                  onPressed: _isTranscribing ? null : _toggleRecording,
+                  tooltip: _isRecording ? 'Stop recording' : 'Voice input',
+                ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
@@ -598,26 +723,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildTemplateChip(String label, String prefix) {
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: ActionChip(
         label: Text(
           label, 
           style: const TextStyle(
             fontSize: 12, 
-            color: Colors.black87,  // Dark text for visibility
+            color: Colors.black87,
             fontWeight: FontWeight.w500,
           ),
         ),
         onPressed: () {
-          setState(() {
-            _controller.text = prefix;
-            _controller.selection = TextSelection.fromPosition(
-              TextPosition(offset: _controller.text.length),
-            );
-          });
+          _controller.text = prefix;
+          _controller.selection = TextSelection.fromPosition(
+            TextPosition(offset: _controller.text.length),
+          );
         },
-        backgroundColor: Colors.amber[100],  // Bright yellow background
-        side: BorderSide(color: Colors.amber[300]!),
       ),
     );
   }
