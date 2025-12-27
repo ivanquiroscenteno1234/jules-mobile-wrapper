@@ -1,10 +1,16 @@
+import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
+import 'main.dart' show showNotification;
 
 class ChatMessage {
   final String id;
@@ -92,21 +98,25 @@ class PlanStep {
 
 class ChatScreen extends StatefulWidget {
   final String repoName;
-  final String sourceId;
+  final String? sourceId; // Nullable for repoless sessions
   final String? sessionId; // Optional for reconnecting
+  final String? initialPrompt; // Auto-send on connect
+  final bool autoMode; // Auto-create PR mode
 
   const ChatScreen({
     super.key, 
     required this.repoName, 
-    required this.sourceId,
+    this.sourceId,  // Now optional
     this.sessionId,
+    this.initialPrompt,
+    this.autoMode = false,
   });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late WebSocketChannel _channel;
@@ -131,15 +141,55 @@ class _ChatScreenState extends State<ChatScreen> {
   // Session state tracking
   String _sessionState = 'UNKNOWN'; // QUEUED, PLANNING, AWAITING_PLAN_APPROVAL, IN_PROGRESS, COMPLETED, FAILED
 
+  // Audio recording
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  bool _isTranscribing = false;
+
+  // UX Improvements
+  String? _currentProgressTitle;
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _audioRecorder.dispose();
+    _controller.dispose();
+    _scrollController.dispose();
+    _channel.sink.close();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _connect();
   }
 
-  void _connect() {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Reconnect if connection was lost while in background
+      if (!_isConnected) {
+        debugPrint('App resumed, reconnecting WebSocket...');
+        _connect();
+      }
+    }
+  }
+
+  void _connect() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id');
+    
     final wsUrl = AppConfig.serverUrl.replaceFirst('http', 'ws');
-    String uri = '$wsUrl/chat/${widget.sourceId}';
+    
+    // Use repoless endpoint when no sourceId provided
+    String uri;
+    if (widget.sourceId != null && widget.sourceId!.isNotEmpty) {
+      uri = '$wsUrl/chat/${widget.sourceId}';
+    } else {
+      uri = '$wsUrl/chat';  // Repoless endpoint
+    }
     
     // Build query parameters
     final queryParams = <String, String>{};
@@ -148,8 +198,12 @@ class _ChatScreenState extends State<ChatScreen> {
       queryParams['session_id'] = widget.sessionId!;
     }
     
-    // Pass auto_mode setting
-    if (AppConfig.autoMode) {
+    if (userId != null) {
+      queryParams['user_id'] = userId;
+    }
+    
+    // Pass auto_mode setting (only for repo-based sessions)
+    if ((widget.autoMode || AppConfig.autoMode) && widget.sourceId != null) {
       queryParams['auto_mode'] = 'true';
     }
     
@@ -159,7 +213,19 @@ class _ChatScreenState extends State<ChatScreen> {
     
     try {
       _channel = WebSocketChannel.connect(Uri.parse(uri));
-      _isConnected = true;
+      setState(() {
+        _isConnected = true;
+      });
+      
+      // Auto-send initial prompt if provided
+      if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
+        // Small delay to ensure WebSocket is ready
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (_isConnected) {
+            _sendMessageText(widget.initialPrompt!);
+          }
+        });
+      }
       
       _channel.stream.listen(
         (message) {
@@ -193,14 +259,19 @@ class _ChatScreenState extends State<ChatScreen> {
               } else if (chatMsg.type == 'failed') {
                 _sessionState = 'FAILED';
               }
-              // Track pending plan for approval
+               // Track pending plan for approval
               if (chatMsg.type == 'plan' && chatMsg.planId != null) {
                 _pendingPlanId = chatMsg.planId;
               }
               
-              // Clear pending plan if session is completed
-              if (chatMsg.type == 'completed') {
+              // Clear pending plan if session is completed or approved
+              if (chatMsg.type == 'completed' || chatMsg.type == 'plan_approved') {
                 _pendingPlanId = null;
+              }
+
+              // Update progress title
+              if (chatMsg.type == 'progress') {
+                _currentProgressTitle = chatMsg.content;
               }
               
               // Only stop waiting on completion events or when Jules needs input
@@ -273,27 +344,21 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  @override
-  void dispose() {
-    if (_isConnected) {
-      _channel.sink.close();
-    }
-    _controller.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
   void _sendMessage() {
     if (_controller.text.isNotEmpty && _isConnected) {
-      final text = _controller.text;
-      
+      _sendMessageText(_controller.text);
+      _controller.clear();
+    }
+  }
+  
+  void _sendMessageText(String text) {
+    if (text.isNotEmpty && _isConnected) {
       setState(() {
         _messages.add(ChatMessage.user(text));
         _isWaiting = true;
       });
       
       _channel.sink.add(text);
-      _controller.clear();
       _scrollToBottom();
     }
   }
@@ -441,6 +506,214 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _toggleRecording() async {
+    try {
+      if (_isRecording) {
+        final path = await _audioRecorder.stop();
+        setState(() => _isRecording = false);
+        if (path != null) {
+          _transcribeAudio(path);
+        }
+      } else {
+        if (await _audioRecorder.hasPermission()) {
+          final tempDir = await getTemporaryDirectory();
+          final path = p.join(tempDir.path, 'recording_${DateTime.now().millisecondsSinceEpoch}.m4a');
+          
+          const config = RecordConfig(); // Default config
+          await _audioRecorder.start(config, path: path);
+          setState(() => _isRecording = true);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Microphone permission denied')),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error toggling recording: $e');
+      setState(() => _isRecording = false);
+    }
+  }
+
+  Future<void> _transcribeAudio(String path) async {
+    setState(() => _isTranscribing = true);
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('${AppConfig.serverUrl}/stt'));
+      request.headers['ngrok-skip-browser-warning'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('file', path));
+
+      final response = await request.send();
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        final text = data['text'] ?? '';
+        
+        if (text.isNotEmpty) {
+          setState(() {
+            _controller.text = (_controller.text + ' ' + text).trim();
+          });
+        }
+      } else {
+        throw Exception('Transcription failed with status: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Transcription error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Speech to text failed: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isTranscribing = false);
+      // Delete temp file
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    }
+  }
+
+  void _showCreateRepoDialog() {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController descController = TextEditingController();
+    bool isPrivate = false;
+    bool isCreating = false;
+    String? errorMessage;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.add_box_outlined, color: Colors.deepPurple),
+              SizedBox(width: 8),
+              Text('Create GitHub Repository'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Repository Name', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    hintText: 'my-new-project',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 16),
+                const Text('Description (optional)', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: descController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    hintText: 'A brief description of the project',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Private Repository'),
+                  subtitle: Text(
+                    isPrivate ? 'Only you can see this repository' : 'Anyone can see this repository',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  value: isPrivate,
+                  onChanged: (value) => setDialogState(() => isPrivate = value),
+                  activeColor: Colors.deepPurple,
+                ),
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(errorMessage!, style: const TextStyle(color: Colors.red)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isCreating ? null : () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: (nameController.text.trim().isEmpty || isCreating)
+                ? null
+                : () async {
+                    setDialogState(() {
+                      isCreating = true;
+                      errorMessage = null;
+                    });
+                    
+                    try {
+                      final response = await http.post(
+                        Uri.parse('${AppConfig.serverUrl}/github/repos'),
+                        headers: {
+                          'ngrok-skip-browser-warning': 'true',
+                          'Content-Type': 'application/json',
+                        },
+                        body: jsonEncode({
+                          'name': nameController.text.trim(),
+                          'description': descController.text.trim(),
+                          'private': isPrivate,
+                        }),
+                      );
+                      
+                      if (response.statusCode == 200) {
+                        final data = jsonDecode(response.body);
+                        Navigator.pop(dialogContext);
+                        
+                        // Show success message with repo URL
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Repository "${data['name']}" created!'),
+                              action: SnackBarAction(
+                                label: 'Open',
+                                onPressed: () async {
+                                  final uri = Uri.parse(data['html_url']);
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                  }
+                                },
+                              ),
+                              duration: const Duration(seconds: 5),
+                            ),
+                          );
+                        }
+                      } else {
+                        final errorData = jsonDecode(response.body);
+                        setDialogState(() {
+                          isCreating = false;
+                          errorMessage = errorData['detail'] ?? 'Failed to create repository';
+                        });
+                      }
+                    } catch (e) {
+                      setDialogState(() {
+                        isCreating = false;
+                        errorMessage = 'Error: $e';
+                      });
+                    }
+                  },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+              ),
+              child: isCreating 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSessionStateBadge() {
     Color bgColor;
     Color textColor = Colors.white;
@@ -513,6 +786,15 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          // Show "Create Repo" button only for repoless sessions
+          if (widget.sourceId == null || widget.sourceId!.isEmpty)
+            IconButton(
+              icon: const Icon(Icons.add_box_outlined),
+              tooltip: 'Create GitHub Repository',
+              onPressed: _showCreateRepoDialog,
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -572,9 +854,26 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: _isRecording 
+                      ? const Icon(Icons.stop, color: Colors.red) 
+                      : _isTranscribing 
+                          ? const SizedBox(
+                              width: 20, 
+                              height: 20, 
+                              child: CircularProgressIndicator(strokeWidth: 2)
+                            )
+                          : const Icon(Icons.mic, color: Colors.deepPurple),
+                  onPressed: _isTranscribing ? null : _toggleRecording,
+                  tooltip: _isRecording ? 'Stop recording' : 'Voice input',
+                ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    minLines: 1,
+                    maxLines: 5,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
                     decoration: const InputDecoration(
                       hintText: 'Ask Jules something...',
                       border: OutlineInputBorder(),
@@ -598,26 +897,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildTemplateChip(String label, String prefix) {
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: ActionChip(
         label: Text(
           label, 
           style: const TextStyle(
             fontSize: 12, 
-            color: Colors.black87,  // Dark text for visibility
+            color: Colors.black87,
             fontWeight: FontWeight.w500,
           ),
         ),
         onPressed: () {
-          setState(() {
-            _controller.text = prefix;
-            _controller.selection = TextSelection.fromPosition(
-              TextPosition(offset: _controller.text.length),
-            );
-          });
+          _controller.text = prefix;
+          _controller.selection = TextSelection.fromPosition(
+            TextPosition(offset: _controller.text.length),
+          );
         },
-        backgroundColor: Colors.amber[100],  // Bright yellow background
-        side: BorderSide(color: Colors.amber[300]!),
       ),
     );
   }
@@ -1382,24 +1677,28 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.code, size: 20, color: Colors.deepPurple),
-            const SizedBox(width: 8),
-            Text(
-              'Working',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: isDark ? Colors.white : Colors.black87),
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
+              ),
             ),
-            const SizedBox(width: 8),
-            _buildAnimatedDots(),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _currentProgressTitle ?? 'Jules is working...',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildAnimatedDots() {
-    return const SizedBox(
-      width: 24,
-      child: Text('•••', style: TextStyle(fontSize: 16, letterSpacing: 2)),
     );
   }
 }

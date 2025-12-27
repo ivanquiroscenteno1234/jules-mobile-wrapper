@@ -1,22 +1,25 @@
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file if it exists
+
 import os
 import json
 import asyncio
 import uuid
 from typing import List, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
+import google.generativeai as genai
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
 # Import the Client
-from jules_client import JulesClient, MockJulesClient
+from jules_client import JulesClient
 from notifications import notification_service, SessionPoller
 from tester_agent import tester_agent
 from github_client import get_github_client
 
 app = FastAPI()
-
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,16 +30,31 @@ app.add_middleware(
 
 # Configuration
 API_KEY = os.environ.get("JULES_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Initialize Gemini for STT
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("WARNING: GEMINI_API_KEY not set. Speech-to-Text will not work.")
 
 # Choose client based on environment
 if API_KEY:
     client = JulesClient(api_key=API_KEY)
 else:
-    print("WARNING: No JULES_API_KEY found. Using MockJulesClient.")
-    client = MockJulesClient(api_key="dummy")
+    print("ERROR: JULES_API_KEY is required. Please set it in your environment.")
+    print("Example: $env:JULES_API_KEY = 'your_api_key'")
+    import sys
+    sys.exit(1)
 
 # Session poller for notifications
 session_poller = SessionPoller(client, notification_service)
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the session polling background task."""
+    asyncio.create_task(session_poller.start_polling(interval_seconds=30))
+    print("Session Poller started.")
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
@@ -131,23 +149,31 @@ async def approve_plan(session_id: str):
 async def delete_session(session_id: str):
     """Deletes a session from Jules."""
     try:
+        # Ensure session_id has correct format (sessions/ID)
+        if not session_id.startswith("sessions/"):
+            session_id = f"sessions/{session_id}"
+        
         # Call Jules API to delete the session
         url = f"{JULES_API_BASE}/{session_id}"
+        print(f"DEBUG delete_session: calling DELETE {url}", flush=True)
         async with httpx.AsyncClient() as http_client:
             response = await http_client.delete(
                 url,
                 headers={"x-goog-api-key": JULES_API_KEY}
             )
+            print(f"DEBUG delete_session: response status={response.status_code}", flush=True)
             if response.status_code == 200 or response.status_code == 204:
                 # Also clean up any stored session data
                 if session_id in completed_session_data:
                     del completed_session_data[session_id]
                 return {"success": True, "message": "Session deleted"}
             else:
+                print(f"DEBUG delete_session error: {response.text}", flush=True)
                 raise HTTPException(status_code=response.status_code, detail=response.text)
     except HTTPException:
         raise
     except Exception as e:
+        print(f"DEBUG delete_session exception: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/sessions/{session_id:path}/publish")
@@ -203,6 +229,82 @@ async def list_repo_branches(owner: str, repo: str):
         return {"branches": branches}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== GitHub Repo Management Endpoints =====
+
+class CreateRepoRequest(BaseModel):
+    name: str
+    description: str = ""
+    private: bool = False
+
+@app.post("/github/repos")
+async def create_github_repo(request: CreateRepoRequest):
+    """Create a new GitHub repository for the authenticated user."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured. Cannot create repositories."
+        )
+    
+    try:
+        repo = await github_client.create_repository(
+            name=request.name,
+            description=request.description,
+            private=request.private,
+            auto_init=True  # Always create with README
+        )
+        return {
+            "success": True,
+            "name": repo["name"],
+            "full_name": repo["full_name"],
+            "html_url": repo["html_url"],
+            "clone_url": repo["clone_url"],
+            "private": repo["private"]
+        }
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 422:
+            raise HTTPException(status_code=422, detail="Repository name already exists or is invalid")
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/github/repos")
+async def list_github_repos():
+    """List GitHub repositories for the authenticated user."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured."
+        )
+    
+    try:
+        repos = await github_client.list_user_repos(per_page=50)
+        return {"repos": repos}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/github/repos/{owner}/{repo}")
+async def delete_github_repo(owner: str, repo: str):
+    """Delete a GitHub repository. Requires delete_repo scope on token."""
+    github_client = get_github_client()
+    if not github_client:
+        raise HTTPException(
+            status_code=500, 
+            detail="GITHUB_TOKEN not configured."
+        )
+    
+    try:
+        success = await github_client.delete_repository(owner, repo)
+        if success:
+            return {"success": True, "message": f"Repository {owner}/{repo} deleted"}
+        else:
+            raise HTTPException(status_code=404, detail="Repository not found or permission denied")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/sessions/{session_id:path}/github-pr")
 async def create_github_pr(
@@ -286,12 +388,46 @@ async def create_github_pr(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.websocket("/chat/{source_id:path}") # :path allows slashes in source_id
+# Repoless WebSocket endpoint - no source_id required
+@app.websocket("/chat")
+async def websocket_repoless_endpoint(
+    websocket: WebSocket, 
+    session_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None)
+):
+    """WebSocket endpoint for repoless sessions (No Codebase mode)."""
+    await _handle_websocket(
+        websocket=websocket,
+        source_id=None,  # Repoless
+        session_id=session_id,
+        auto_mode=False,  # Repoless sessions don't support auto-PR
+        user_id=user_id
+    )
+
+# Repo-based WebSocket endpoint
+@app.websocket("/chat/{source_id:path}")
 async def websocket_endpoint(
     websocket: WebSocket, 
     source_id: str, 
-    session_id: Optional[str] = Query(None),  # For reconnecting to existing session
-    auto_mode: bool = Query(False)  # Auto-approve plans and create PRs
+    session_id: Optional[str] = Query(None),
+    auto_mode: bool = Query(False),
+    user_id: Optional[str] = Query(None)
+):
+    """WebSocket endpoint for repo-based sessions."""
+    await _handle_websocket(
+        websocket=websocket,
+        source_id=source_id,
+        session_id=session_id,
+        auto_mode=auto_mode,
+        user_id=user_id
+    )
+
+async def _handle_websocket(
+    websocket: WebSocket, 
+    source_id: Optional[str],  # None for repoless
+    session_id: Optional[str] = None,
+    auto_mode: bool = False,
+    user_id: Optional[str] = None
 ):
     await websocket.accept()
     
@@ -335,6 +471,11 @@ async def websocket_endpoint(
             session_data = await client.get_session(session_id)
             active_session_id = session_id
             
+            # Link session with user for notifications
+            if user_id:
+                session_poller.track_session(user_id, session_id)
+                print(f"Tracking reconnecting session {session_id} for user {user_id}")
+            
             # Debug: Check what's in session_data
             print(f"DEBUG: session_data keys: {list(session_data.keys()) if session_data else 'None'}", flush=True)
             if session_data and "outputs" in session_data:
@@ -349,13 +490,14 @@ async def websocket_endpoint(
                 "sessionId": session_id
             })
             
-            # IMPORTANT: Immediately fetch and send ALL existing activities (history)
+            # IMPORTANT: Immediately fetch and send latest activities (history)
             print(f"DEBUG: Loading session history...", flush=True)
             try:
-                activities = await client.list_activities(session_id, page_size=100)
+                # Fetch ALL activities for the session
+                activities = await client.list_activities(session_id, page_size=100, get_all=True)
                 print(f"DEBUG: Found {len(activities)} historical activities", flush=True)
                 
-                # Send activities in order (oldest first for proper display)
+                # Send activities in order (already chronological - oldest first for display)
                 for activity in activities:
                     act_id = activity.get("id") or activity.get("name")
                     if act_id:
@@ -366,7 +508,7 @@ async def websocket_endpoint(
                 
                 await websocket.send_json({
                     "type": "system",
-                    "content": f"Loaded {len(activities)} previous activities"
+                    "content": f"Loaded {len(activities)} recent activities"
                 })
             except Exception as e:
                 print(f"Error loading history: {e}")
@@ -422,6 +564,11 @@ async def websocket_endpoint(
                     if not active_session_id:
                         await websocket.send_json({"type": "error", "content": "Could not create session"})
                         continue
+                    
+                    # Track new session for notifications
+                    if user_id:
+                        session_poller.track_session(user_id, active_session_id)
+                        print(f"Tracking new session {active_session_id} for user {user_id}")
                     
                     # Send confirmation
                     await websocket.send_json({
@@ -484,6 +631,12 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
             for i, s in enumerate(plan_data.get("steps", []))
         ]
         result["content"] = f"Plan with {len(result['steps'])} steps"
+        return result
+    
+    # Plan Approved
+    if "planApproved" in activity:
+        result["type"] = "plan_approved"
+        result["content"] = "Plan approved"
         return result
     
     # Agent Message
@@ -795,28 +948,8 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
             print(f"DEBUG: Unhandled activity keys: {unknown_keys}")
         return None
     
+
     return result
-
-if __name__ == "__main__":
-    # Attempt to start ngrok for easier mobile testing
-    try:
-        from pyngrok import ngrok
-
-        # Open a HTTP tunnel on the default port 8000
-        # <NgrokTunnel: "http://<public_sub>.ngrok.io" -> "http://localhost:8000">
-        http_tunnel = ngrok.connect(8000)
-        public_url = http_tunnel.public_url
-        print("\n" + "="*60)
-        print(f"NGROK TUNNEL STARTED: {public_url}")
-        print("Use this URL in your Mobile App Settings!")
-        print("="*60 + "\n")
-    except ImportError:
-        print("Warning: 'pyngrok' not installed. Skipping auto-tunnel.")
-    except Exception as e:
-        print(f"Warning: Could not start ngrok: {e}")
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
 
 # ===== Tester Agent Endpoints =====
 
@@ -853,3 +986,70 @@ async def get_test_status(test_id: str):
 async def list_tests():
     """List all tests."""
     return [tester_agent.to_json(t) for t in tester_agent.tests.values()]
+
+# ===== Speech to Text Endpoints =====
+
+@app.post("/stt")
+async def speech_to_text(file: UploadFile = File(...)):
+    """Transcribe an audio file using Gemini 3 Flash with thinking."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server")
+    
+    try:
+        # Save temporary file
+        temp_filename = f"temp_{uuid.uuid4()}.{file.filename.split('.')[-1]}"
+        with open(temp_filename, "wb") as buffer:
+            buffer.write(await file.read())
+        
+        # Using Gemini 3 Flash with thinking_level="medium"
+        # Requires google-genai >= 1.51.0
+        from google import genai
+        from google.genai import types
+        
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        # Upload file to Gemini
+        myfile = client.files.upload(file=temp_filename)
+        
+        # Generate transcription with medium thinking level
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[
+                "Transcribe this audio accurately. Only return the transcribed text, nothing else.",
+                myfile
+            ],
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(thinking_level="medium")
+            )
+        )
+        
+        # Cleanup
+        os.remove(temp_filename)
+        
+        return {"text": response.text.strip()}
+    
+    except Exception as e:
+        print(f"STT Error: {e}")
+        if 'temp_filename' in locals() and os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+if __name__ == "__main__":
+    # Attempt to start ngrok for easier mobile testing
+    try:
+        from pyngrok import ngrok
+
+        # Open a HTTP tunnel on the default port 8000
+        # <NgrokTunnel: "http://<public_sub>.ngrok.io" -> "http://localhost:8000">
+        http_tunnel = ngrok.connect(8000)
+        public_url = http_tunnel.public_url
+        print("\n" + "="*60)
+        print(f"NGROK TUNNEL STARTED: {public_url}")
+        print("Use this URL in your Mobile App Settings!")
+        print("="*60 + "\n")
+    except ImportError:
+        print("Warning: 'pyngrok' not installed. Skipping auto-tunnel.")
+    except Exception as e:
+        print(f"Warning: Could not start ngrok: {e}")
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
