@@ -31,6 +31,80 @@ class GitHubClient:
             "X-GitHub-Api-Version": "2022-11-28",
         }
     
+    async def create_repository(
+        self, 
+        name: str, 
+        description: str = "",
+        private: bool = False,
+        auto_init: bool = True
+    ) -> Dict:
+        """
+        Create a new GitHub repository for the authenticated user.
+        
+        Args:
+            name: Repository name
+            description: Repository description
+            private: Whether the repo is private
+            auto_init: Whether to create an initial README
+            
+        Returns:
+            Dict with repo info including 'full_name', 'html_url', 'clone_url'
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}/user/repos",
+                headers=self.headers,
+                json={
+                    "name": name,
+                    "description": description,
+                    "private": private,
+                    "auto_init": auto_init
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def list_user_repos(self, per_page: int = 30) -> List[Dict]:
+        """
+        List repositories for the authenticated user.
+        
+        Returns:
+            List of repo dicts with 'name', 'full_name', 'html_url', 'private'
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{self.base_url}/user/repos",
+                headers=self.headers,
+                params={"per_page": per_page, "sort": "updated"}
+            )
+            response.raise_for_status()
+            repos = response.json()
+            return [{
+                "name": r["name"],
+                "full_name": r["full_name"],
+                "html_url": r["html_url"],
+                "private": r["private"],
+                "description": r.get("description", ""),
+                "owner": r["owner"]["login"]
+            } for r in repos]
+    
+    async def delete_repository(self, owner: str, repo: str) -> bool:
+        """
+        Delete a GitHub repository.
+        
+        Note: Requires 'delete_repo' scope on the token.
+        
+        Returns:
+            True if deleted successfully
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.delete(
+                f"{self.base_url}/repos/{owner}/{repo}",
+                headers=self.headers
+            )
+            # 204 No Content = success
+            return response.status_code == 204
+    
     async def list_branches(self, owner: str, repo: str) -> List[Dict]:
         """
         List all branches in a repository.

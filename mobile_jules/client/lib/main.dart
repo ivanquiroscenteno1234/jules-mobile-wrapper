@@ -1,9 +1,96 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
 import 'config.dart';
 
-void main() {
+// Global notification plugin instance
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize local notifications (skip on web - not supported)
+  if (!kIsWeb) {
+    await _initNotifications();
+  }
+  
+  // Generate user_id if not exists
+  final prefs = await SharedPreferences.getInstance();
+  if (prefs.getString('user_id') == null) {
+    await prefs.setString('user_id', 'user_${DateTime.now().millisecondsSinceEpoch}');
+  }
+  
   runApp(const MyApp());
+}
+
+Future<void> _initNotifications() async {
+  // Android initialization
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  // iOS initialization
+  const DarwinInitializationSettings initializationSettingsIOS =
+      DarwinInitializationSettings(
+    requestAlertPermission: true,
+    requestBadgePermission: true,
+    requestSoundPermission: true,
+  );
+
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+    iOS: initializationSettingsIOS,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  
+  // Request permissions on Android 13+ (skip on web)
+  if (!kIsWeb && Platform.isAndroid) {
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+  }
+}
+
+/// Show a local notification
+Future<void> showNotification({
+  required String title,
+  required String body,
+  String? payload,
+}) async {
+  const AndroidNotificationDetails androidNotificationDetails =
+      AndroidNotificationDetails(
+    'jules_channel',
+    'Jules Updates',
+    channelDescription: 'Notifications from Jules AI assistant',
+    importance: Importance.max,
+    priority: Priority.high,
+    ticker: 'Jules Update',
+  );
+
+  const DarwinNotificationDetails iOSNotificationDetails =
+      DarwinNotificationDetails(
+    presentAlert: true,
+    presentBadge: true,
+    presentSound: true,
+  );
+
+  const NotificationDetails notificationDetails = NotificationDetails(
+    android: androidNotificationDetails,
+    iOS: iOSNotificationDetails,
+  );
+
+  await flutterLocalNotificationsPlugin.show(
+    DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    title,
+    body,
+    notificationDetails,
+    payload: payload,
+  );
 }
 
 class MyApp extends StatefulWidget {
@@ -65,9 +152,7 @@ class _MyAppState extends State<MyApp> {
           primary: Colors.deepPurple[300]!,
           secondary: Colors.purpleAccent[100]!,
           surface: const Color(0xFF1E1E2E),
-          background: const Color(0xFF11111B),
           onSurface: Colors.white,
-          onBackground: Colors.white,
         ),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF11111B),
@@ -113,9 +198,9 @@ class _MyAppState extends State<MyApp> {
           ),
         ),
         
-        chipTheme: ChipThemeData(
-          backgroundColor: const Color(0xFF3A3A4E),
-          labelStyle: const TextStyle(color: Colors.white),
+        chipTheme: const ChipThemeData(
+          backgroundColor: Color(0xFF3A3A4E),
+          labelStyle: TextStyle(color: Colors.white),
         ),
         
         iconTheme: const IconThemeData(color: Colors.white),
