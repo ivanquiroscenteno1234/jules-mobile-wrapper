@@ -18,13 +18,22 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> repos = [];
+  List<dynamic> _filteredRepos = [];
   bool isLoading = true;
   String? error;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     fetchRepos();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> fetchRepos() async {
@@ -37,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         setState(() {
           repos = json.decode(response.body);
+          _filteredRepos = repos;
           isLoading = false;
         });
       } else {
@@ -53,13 +63,51 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _filterRepos(String query) {
+    if (query.isEmpty) {
+      setState(() {
+        _filteredRepos = repos;
+      });
+    } else {
+      setState(() {
+        _filteredRepos = repos
+            .where((repo) =>
+                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
+                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
+            .toList();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mobile Jules'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search repositories...',
+                  border: InputBorder.none,
+                ),
+                onChanged: _filterRepos,
+              )
+            : const Text('Mobile Jules'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                  _filterRepos('');
+                }
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.science),
             tooltip: 'Test App',
@@ -181,20 +229,19 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const Spacer(),
                           Text(
-                            '${repos.length} repos',
+                            '${_filteredRepos.length} repos',
                             style: TextStyle(color: Colors.grey[600]),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 8),
-                    
                     // Repos List
                     Expanded(
                       child: ListView.builder(
-                        itemCount: repos.length,
+                        itemCount: _filteredRepos.length,
                         itemBuilder: (context, index) {
-                          final repo = repos[index];
+                          final repo = _filteredRepos[index];
                           return Card(
                             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                             child: ListTile(
