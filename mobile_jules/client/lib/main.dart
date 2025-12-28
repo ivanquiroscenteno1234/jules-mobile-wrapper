@@ -25,9 +25,6 @@ void main() async {
   }
   
   runApp(const MyApp());
-  
-  // INTENTIONAL ERROR: Test Jules build repair
-  nonExistentFunction();
 }
 
 Future<void> _initNotifications() async {

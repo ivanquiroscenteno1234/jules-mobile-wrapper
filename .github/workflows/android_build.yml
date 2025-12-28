@@ -59,32 +59,3 @@ jobs:
           GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
         run: python scripts/upload_with_oauth.py
-
-  repair:
-    name: Jules Repair Build
-    needs: build
-    # Only runs if the 'build' job fails
-    if: failure()
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write  # Required for Jules to create PRs with fixes
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Invoke Jules to Fix Flutter Build
-        uses: google-labs-code/jules-invoke@v1
-        with:
-          prompt: |
-            The Flutter Android build failed in the 'build' job. 
-            Context:
-            - We are using a temporary build project approach.
-            - Path: mobile_jules/client/
-            - Error occurred during 'flutter build apk' or 'flutter pub get'.
-            
-            Please:
-            1. Look at the repository files and the build logs.
-            2. Identify if it's a dependency conflict (pubspec.yaml) or a Gradle/Java 17 incompatibility.
-            3. Propose a fix or create a PR with the corrected configuration.
-        env:
-          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
