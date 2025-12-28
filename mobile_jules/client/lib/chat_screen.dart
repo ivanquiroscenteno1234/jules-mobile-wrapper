@@ -234,6 +234,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             final chatMsg = ChatMessage.fromJson(json);
             
             setState(() {
+              print('DEBUG: Incoming message type=${chatMsg.type}, id=${chatMsg.id}, content=${chatMsg.content.length > 30 ? chatMsg.content.substring(0, 30) + "..." : chatMsg.content}');
+              
+              // Handle transient status messages (e.g., "Creating session...", "Jules is working...")
+              if (chatMsg.type == 'status') {
+                // A new status message replaces any previous ones
+                _messages.removeWhere((m) => m.type == 'status');
+              } else if (chatMsg.type == 'system' || chatMsg.type == 'progress' || 
+                  chatMsg.type == 'plan' || chatMsg.type == 'completed' ||
+                  chatMsg.type == 'message' || chatMsg.type == 'error' ||
+                  chatMsg.type == 'artifact') {
+                // Any real update clears all transient status messages
+                _messages.removeWhere((m) => m.type == 'status');
+              }
+              
               // Prevent duplicate messages by checking ID
               final isDuplicate = _messages.any((m) => m.id == chatMsg.id);
               if (!isDuplicate) {
@@ -785,7 +799,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _buildSessionStateBadge(),
           ],
         ),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: Colors.deepPurple[400],
         actions: [
           // Show "Create Repo" button only for repoless sessions
           if (widget.sourceId == null || widget.sourceId!.isEmpty)
@@ -811,27 +825,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               },
             ),
           ),
-          // Show approve button if there's a pending plan
-          if (_pendingPlanId != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Colors.amber[50],
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle_outline, color: Colors.amber),
-                  const SizedBox(width: 8),
-                  const Expanded(child: Text('Plan ready for approval')),
-                  ElevatedButton(
-                    onPressed: _approvePlan,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Approve'),
-                  ),
-                ],
-              ),
-            ),
+
           // Task Templates Row
           if (_messages.isEmpty || _messages.length <= 2)
             Container(
@@ -944,26 +938,83 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildPlanCard(ChatMessage msg) {
+    // Check if this plan is the pending one (needs approval)
+    final isPendingPlan = _pendingPlanId != null && msg.planId == _pendingPlanId;
+    
+    // A plan is considered approved if:
+    // 1. It matches the planId of the plan that was just approved (if we tracked it)
+    // 2. OR the session has moved past planning/approval stage
+    final isPlanApproved = _pendingPlanId == null && 
+                          (_sessionState == 'IN_PROGRESS' || 
+                           _sessionState == 'COMPLETED' || 
+                           _sessionState == 'FAILED');
+    
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      child: ExpansionTile(
-        leading: const Icon(Icons.list_alt, color: Colors.deepPurple),
-        title: Text('Plan (${msg.steps?.length ?? 0} steps)'),
-        children: msg.steps?.asMap().entries.map((entry) {
-          final idx = entry.key;
-          final step = entry.value as Map<String, dynamic>;
-          return ListTile(
-            leading: CircleAvatar(
-              radius: 12,
-              backgroundColor: Colors.deepPurple,
-              child: Text(
-                '${idx + 1}',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
-            title: Text(step['title'] ?? 'Step ${idx + 1}'),
-          );
-        }).toList() ?? [],
+      child: Column(
+        children: [
+          ExpansionTile(
+            leading: const Icon(Icons.list_alt, color: Colors.deepPurple),
+            title: Text('Plan (${msg.steps?.length ?? 0} steps)'),
+            children: msg.steps?.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final step = entry.value as Map<String, dynamic>;
+              return ListTile(
+                leading: CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Colors.deepPurple,
+                  child: Text(
+                    '${idx + 1}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+                title: Text(step['title'] ?? 'Step ${idx + 1}'),
+              );
+            }).toList() ?? [],
+          ),
+          // Approve button inside the plan card
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: isPlanApproved
+              ? Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Plan Accepted',
+                        style: TextStyle(
+                          color: Colors.green[700],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: isPendingPlan ? _approvePlan : null,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Approve Plan'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      disabledBackgroundColor: Colors.grey[300],
+                      disabledForegroundColor: Colors.grey[600],
+                    ),
+                  ),
+                ),
+          ),
+        ],
       ),
     );
   }

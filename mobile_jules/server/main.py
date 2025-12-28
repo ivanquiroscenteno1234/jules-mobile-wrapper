@@ -149,29 +149,12 @@ async def approve_plan(session_id: str):
 async def delete_session(session_id: str):
     """Deletes a session from Jules."""
     try:
-        # Ensure session_id has correct format (sessions/ID)
-        if not session_id.startswith("sessions/"):
-            session_id = f"sessions/{session_id}"
-        
-        # Call Jules API to delete the session
-        url = f"{JULES_API_BASE}/{session_id}"
-        print(f"DEBUG delete_session: calling DELETE {url}", flush=True)
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.delete(
-                url,
-                headers={"x-goog-api-key": JULES_API_KEY}
-            )
-            print(f"DEBUG delete_session: response status={response.status_code}", flush=True)
-            if response.status_code == 200 or response.status_code == 204:
-                # Also clean up any stored session data
-                if session_id in completed_session_data:
-                    del completed_session_data[session_id]
-                return {"success": True, "message": "Session deleted"}
-            else:
-                print(f"DEBUG delete_session error: {response.text}", flush=True)
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-    except HTTPException:
-        raise
+        await client.delete_session(session_id)
+        # Also clean up any stored session data
+        full_session_id = session_id if session_id.startswith("sessions/") else f"sessions/{session_id}"
+        if full_session_id in completed_session_data:
+            del completed_session_data[full_session_id]
+        return {"success": True, "message": "Session deleted"}
     except Exception as e:
         print(f"DEBUG delete_session exception: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))

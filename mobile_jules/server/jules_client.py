@@ -114,6 +114,28 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def delete_session(self, session_id: str) -> bool:
+        """Deletes a session.
+        
+        Args:
+            session_id: The session ID (can be just the ID or full path 'sessions/123...')
+        Returns:
+            True if deletion was successful
+        """
+        # Ensure session_id has correct format (sessions/ID)
+        if not session_id.startswith("sessions/"):
+            session_id = f"sessions/{session_id}"
+        
+        url = f"{self.base_url}/{session_id}"
+        print(f"DEBUG delete_session: calling DELETE {url}", flush=True)
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(url, headers=self.headers)
+            print(f"DEBUG delete_session: response status={resp.status_code}", flush=True)
+            if not resp.is_success:
+                print(f"DEBUG delete_session error: {resp.text}", flush=True)
+            resp.raise_for_status()
+            return True
+
     async def list_activities(self, session_id: str, page_size: int = 100, get_all: bool = False) -> List[Dict]:
         """Fetches the history of the session (user messages, agent plans/responses).
         
