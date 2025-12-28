@@ -14,16 +14,28 @@ class GitHubReposScreen extends StatefulWidget {
 
 class _GitHubReposScreenState extends State<GitHubReposScreen> {
   List<Map<String, dynamic>> _repos = [];
+  List<Map<String, dynamic>> _filteredRepos = [];
   bool _isLoading = true;
   String? _error;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    print('[GitHubReposScreen] Initializing state.');
     _loadRepos();
   }
 
+  @override
+  void dispose() {
+    print('[GitHubReposScreen] Disposing state.');
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadRepos() async {
+    print('[GitHubReposScreen] Loading repositories...');
     setState(() {
       _isLoading = true;
       _error = null;
@@ -39,15 +51,19 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
         final data = jsonDecode(response.body);
         setState(() {
           _repos = List<Map<String, dynamic>>.from(data['repos']);
+          _filteredRepos = _repos;
           _isLoading = false;
         });
+        print('[GitHubReposScreen] Successfully loaded ${_repos.length} repositories.');
       } else {
+        print('[GitHubReposScreen] Failed to load repositories: ${response.statusCode}');
         setState(() {
           _error = 'Failed to load repositories';
           _isLoading = false;
         });
       }
     } catch (e) {
+      print('[GitHubReposScreen] Error loading repositories: $e');
       setState(() {
         _error = 'Error: $e';
         _isLoading = false;
@@ -104,8 +120,12 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
       ),
     );
 
-    if (confirmed != true) return false;
+    if (confirmed != true) {
+      print('[GitHubReposScreen] Deletion cancelled for "${repo['full_name']}".');
+      return false;
+    }
 
+    print('[GitHubReposScreen] Deleting repository "${repo['full_name']}"...');
     try {
       final response = await http.delete(
         Uri.parse('${AppConfig.serverUrl}/github/repos/${repo['owner']}/${repo['name']}'),
@@ -113,8 +133,10 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
       );
 
       if (response.statusCode == 200) {
+        print('[GitHubReposScreen] Successfully deleted "${repo['full_name']}".');
         setState(() {
           _repos.removeWhere((r) => r['full_name'] == repo['full_name']);
+          _filterRepos(_searchController.text);
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -124,9 +146,12 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
         return true;
       } else {
         final errorData = jsonDecode(response.body);
-        throw Exception(errorData['detail'] ?? 'Failed to delete repository');
+        final errorMessage = errorData['detail'] ?? 'Failed to delete repository';
+        print('[GitHubReposScreen] Error deleting "${repo['full_name']}": $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[GitHubReposScreen] Exception while deleting "${repo['full_name']}": $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -146,13 +171,52 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
     }
   }
 
+  void _filterRepos(String query) {
+    print('[GitHubReposScreen] Filtering repositories with query: "$query"');
+    if (query.isEmpty) {
+      setState(() {
+        _filteredRepos = _repos;
+      });
+    } else {
+      setState(() {
+        _filteredRepos = _repos
+            .where((repo) =>
+                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
+                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
+            .toList();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GitHub Repositories'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search repositories...',
+                  border: InputBorder.none,
+                ),
+                onChanged: _filterRepos,
+              )
+            : const Text('GitHub Repositories'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                  _filterRepos('');
+                }
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadRepos,
@@ -194,9 +258,9 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
                   : RefreshIndicator(
                       onRefresh: _loadRepos,
                       child: ListView.builder(
-                        itemCount: _repos.length,
+                        itemCount: _filteredRepos.length,
                         itemBuilder: (context, index) {
-                          final repo = _repos[index];
+                          final repo = _filteredRepos[index];
                           return Dismissible(
                             key: Key(repo['full_name']),
                             direction: DismissDirection.endToStart,
