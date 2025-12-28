@@ -3,3 +3,5 @@ uvicorn
 pydantic
 pyngrok
 requests
+python-multipart
+httpx

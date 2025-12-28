@@ -2,8 +2,9 @@ import os
 import json
 import asyncio
 import uuid
+import shutil
 from typing import List, Dict, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -41,6 +42,29 @@ session_poller = SessionPoller(client, notification_service)
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
 completed_session_data: Dict[str, Dict] = {}
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Uploads an image to a temporary directory."""
+    
+    # Ensure the uploads directory exists
+    upload_dir = "uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    # Generate a unique filename
+    file_ext = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_ext}"
+    file_path = os.path.join(upload_dir, unique_filename)
+    
+    # Save the file
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return {"filename": unique_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        file.file.close()
 
 # Device registration model
 class DeviceRegistration(BaseModel):
@@ -404,14 +428,24 @@ async def websocket_endpoint(
                         "type": "status",
                         "content": "Creating session and sending task to Jules..."
                     })
-                    
+
+                    # NEW: Handle JSON for image uploads or plain text for regular messages
+                    try:
+                        message_data = json.loads(data)
+                        prompt = message_data.get("prompt", "")
+                        image_filenames = message_data.get("image_filenames", [])
+                    except json.JSONDecodeError:
+                        prompt = data
+                        image_filenames = []
+
                     # Create session with user's message as the actual task
                     session_data = await client.create_session(
-                        source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
+                        source_id=source_id,
+                        prompt=prompt,
+                        image_filenames=image_filenames, # Pass image filenames
                         auto_mode=auto_mode
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    print(f"DEBUG: Created session with task: {prompt[:50]}...")
                     
                     # Extract session_id from response
                     active_session_id = session_data.get("name")
@@ -442,8 +476,15 @@ async def websocket_endpoint(
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
+                    try:
+                        message_data = json.loads(data)
+                        prompt = message_data.get("prompt", "")
+                        image_filenames = message_data.get("image_filenames", [])
+                    except json.JSONDecodeError:
+                        prompt = data
+                        image_filenames = []
                     # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    await client.send_message(active_session_id, prompt, image_filenames=image_filenames)
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")

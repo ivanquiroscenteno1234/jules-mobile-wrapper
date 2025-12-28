@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'dart:io';
 import 'config.dart';
 
 class ChatMessage {
@@ -115,6 +118,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isWaiting = false; // Start as false - button should be enabled for new sessions
   String? _currentSessionId;
   String? _pendingPlanId;
+
+  // Input mode
+  String _inputMode = 'text'; // 'text', 'speech', 'image'
+  final List<XFile> _selectedImages = [];
+  late stt.SpeechToText _stt;
+  bool _isListening = false;
   
   // Publish state tracking
   bool _isPublishing = false;
@@ -135,6 +144,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _connect();
+    _stt = stt.SpeechToText();
   }
 
   void _connect() {
@@ -283,19 +293,79 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
-    if (_controller.text.isNotEmpty && _isConnected) {
+  void _sendMessage() async {
+    if ((_controller.text.isNotEmpty || _selectedImages.isNotEmpty) && _isConnected) {
       final text = _controller.text;
-      
+      final imageFiles = List<XFile>.from(_selectedImages);
+
       setState(() {
         _messages.add(ChatMessage.user(text));
         _isWaiting = true;
+        _selectedImages.clear();
       });
-      
-      _channel.sink.add(text);
+
+      if (imageFiles.isNotEmpty) {
+        List<String> uploadedImageFilenames = [];
+        for (var imageFile in imageFiles) {
+          var request = http.MultipartRequest(
+            'POST',
+            Uri.parse('${AppConfig.serverUrl}/upload-image'),
+          );
+          request.files.add(
+            await http.MultipartFile.fromPath('file', imageFile.path),
+          );
+          var response = await request.send();
+          if (response.statusCode == 200) {
+            final responseBody = await response.stream.bytesToString();
+            final jsonResponse = json.decode(responseBody);
+            uploadedImageFilenames.add(jsonResponse['filename']);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Image upload failed')),
+            );
+          }
+        }
+        _channel.sink.add(json.encode({
+          "prompt": text,
+          "image_filenames": uploadedImageFilenames,
+        }));
+      } else {
+        _channel.sink.add(text);
+      }
+
       _controller.clear();
       _scrollToBottom();
     }
+  }
+
+  void _pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _selectedImages.add(pickedFile);
+      });
+    }
+  }
+
+  void _startListening() async {
+    bool available = await _stt.initialize(
+      onStatus: (val) => print('onStatus: $val'),
+      onError: (val) => print('onError: $val'),
+    );
+    if (available) {
+      setState(() => _isListening = true);
+      _stt.listen(
+        onResult: (val) => setState(() {
+          _controller.text = val.recognizedWords;
+        }),
+      );
+    }
+  }
+
+  void _stopListening() {
+    _stt.stop();
+    setState(() => _isListening = false);
   }
 
   void _approvePlan() {
@@ -570,28 +640,119 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    decoration: const InputDecoration(
-                      hintText: 'Ask Jules something...',
-                      border: OutlineInputBorder(),
+                if (_selectedImages.isNotEmpty)
+                  _buildImagePreview(),
+                Row(
+                  children: [
+                    _buildInputModeButton(),
+                    Expanded(
+                      child: _isListening
+                          ? const Text("Listening...")
+                          : TextField(
+                              controller: _controller,
+                              decoration: const InputDecoration(
+                                hintText: 'Ask Jules something...',
+                                border: OutlineInputBorder(),
+                              ),
+                              onSubmitted: (_) => _sendMessage(),
+                            ),
                     ),
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  color: Colors.deepPurple,
-                  onPressed: _isWaiting ? null : _sendMessage,
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      color: Colors.deepPurple,
+                      onPressed: _isWaiting ? null : _sendMessage,
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildInputModeButton() {
+    return PopupMenuButton<String>(
+      icon: Icon(
+        _inputMode == 'speech'
+            ? (_isListening ? Icons.mic_off : Icons.mic)
+            : _inputMode == 'image'
+                ? Icons.image
+                : Icons.text_fields,
+      ),
+      onSelected: (value) {
+        if (value == 'speech') {
+          if (_isListening) {
+            _stopListening();
+          } else {
+            _startListening();
+          }
+        } else if (value == 'image') {
+          _pickImage();
+        }
+        setState(() {
+          _inputMode = value;
+        });
+      },
+      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+        const PopupMenuItem<String>(
+          value: 'text',
+          child: ListTile(
+            leading: Icon(Icons.text_fields),
+            title: Text('Text'),
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'speech',
+          child: ListTile(
+            leading: Icon(Icons.mic),
+            title: Text('Speech'),
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'image',
+          child: ListTile(
+            leading: Icon(Icons.image),
+            title: Text('Image'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImagePreview() {
+    return Container(
+      height: 100,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _selectedImages.length,
+        itemBuilder: (context, index) {
+          return Stack(
+            children: [
+              Image.file(
+                File(_selectedImages[index].path),
+                width: 100,
+                height: 100,
+                fit: BoxFit.cover,
+              ),
+              Positioned(
+                right: 0,
+                child: IconButton(
+                  icon: const Icon(Icons.cancel),
+                  onPressed: () {
+                    setState(() {
+                      _selectedImages.removeAt(index);
+                    });
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

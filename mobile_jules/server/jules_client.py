@@ -1,6 +1,7 @@
 import os
 import httpx
 import asyncio
+import base64
 from typing import List, Dict, Optional
 
 class JulesClient:
@@ -36,11 +37,12 @@ class JulesClient:
             return data.get("sessions", [])
 
     async def create_session(
-        self, 
-        source_id: str, 
+        self,
+        source_id: str,
         prompt: str = "Start session",
         auto_mode: bool = False,
-        starting_branch: str = None
+        starting_branch: str = None,
+        image_filenames: List[str] = None
     ) -> Dict:
         """Creates a new chat session.
         
@@ -49,13 +51,37 @@ class JulesClient:
             prompt: Initial task description
             auto_mode: If True, auto-approve plans and auto-create PRs (DEFAULT: False)
             starting_branch: Optional branch to start from (defaults to repo's default branch)
+            image_filenames: List of filenames of images to include as visual context.
         """
         github_context = {}
         if starting_branch:
             github_context["startingBranch"] = starting_branch
-            
+
+        # Prepare visual contexts if image filenames are provided
+        visual_contexts = []
+        if image_filenames:
+            for filename in image_filenames:
+                file_path = os.path.join("uploads", filename)
+                try:
+                    with open(file_path, "rb") as image_file:
+                        encoded_string = base64.b64encode(image_file.read()).decode()
+                        visual_contexts.append({
+                            "image": {
+                                "data": encoded_string
+                            }
+                        })
+                    # Clean up the temporary file
+                    os.remove(file_path)
+                except FileNotFoundError:
+                    print(f"Warning: Image file not found: {file_path}")
+                except Exception as e:
+                    print(f"Error processing image {filename}: {e}")
+
         payload = {
-            "prompt": prompt,
+            "prompt": {
+                "text": prompt,
+                "visualContexts": visual_contexts
+            },
             "sourceContext": {
                 "source": source_id,
                 "githubRepoContext": github_context
@@ -77,14 +103,39 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def send_message(self, session_id: str, message: str):
+    async def send_message(self, session_id: str, message: str, image_filenames: List[str] = None):
         """Sends a user message to an existing session."""
         # Note: session_id usually comes in full form "sessions/123..."
-        # If the API expects just the ID, we might need to parse it, 
+        # If the API expects just the ID, we might need to parse it,
         # but the docs show using the full resource name in the URL.
         url = f"{self.base_url}/{session_id}:sendMessage"
+
+        # Prepare visual contexts if image filenames are provided
+        visual_contexts = []
+        if image_filenames:
+            for filename in image_filenames:
+                file_path = os.path.join("uploads", filename)
+                try:
+                    with open(file_path, "rb") as image_file:
+                        encoded_string = base64.b64encode(image_file.read()).decode()
+                        visual_contexts.append({
+                            "image": {
+                                "data": encoded_string
+                            }
+                        })
+                    # Clean up the temporary file
+                    os.remove(file_path)
+                except FileNotFoundError:
+                    print(f"Warning: Image file not found: {file_path}")
+                except Exception as e:
+                    print(f"Error processing image {filename}: {e}")
         
-        payload = {"prompt": message}
+        payload = {
+            "prompt": {
+                "text": message,
+                "visualContexts": visual_contexts
+            }
+        }
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
@@ -169,7 +220,14 @@ class MockJulesClient(JulesClient):
             }
         ]
 
-    async def create_session(self, source_id: str, prompt: str = "Start session") -> Dict:
+    async def create_session(
+        self,
+        source_id: str,
+        prompt: str = "Start session",
+        auto_mode: bool = False,
+        starting_branch: str = None,
+        image_filenames: List[str] = None
+    ) -> Dict:
         return {
             "name": self.mock_session_id,
             "id": "mock-123",
@@ -177,7 +235,7 @@ class MockJulesClient(JulesClient):
             "sourceContext": {"source": source_id}
         }
 
-    async def send_message(self, session_id: str, message: str):
+    async def send_message(self, session_id: str, message: str, image_filenames: List[str] = None):
         # Simulate user message
         self.messages.append({
             "name": f"{session_id}/activities/user-{len(self.messages)}",
