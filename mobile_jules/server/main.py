@@ -2,8 +2,10 @@ import os
 import json
 import asyncio
 import uuid
+import shutil
 from typing import List, Dict, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -24,6 +26,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Create uploads directory if it doesn't exist
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount(f"/{UPLOAD_DIR}", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Accepts an image upload and saves it to the uploads folder."""
+    try:
+        # Sanitize filename to prevent directory traversal attacks
+        filename = os.path.basename(file.filename)
+        if not filename:
+            raise HTTPException(status_code=400, detail="No filename provided.")
+            
+        # Create a unique filename to avoid overwrites
+        unique_id = uuid.uuid4().hex
+        file_extension = os.path.splitext(filename)[1]
+        unique_filename = f"{unique_id}{file_extension}"
+        
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # Return the URL path
+        return {"image_url": f"/{UPLOAD_DIR}/{unique_filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Configuration
 API_KEY = os.environ.get("JULES_API_KEY")
@@ -438,12 +469,22 @@ async def websocket_endpoint(
                     
             else:
                 # Session already exists, handle commands or send messages
-                if data.startswith("/approve"):
-                    await client.approve_plan(active_session_id)
-                    await websocket.send_json({"type": "system", "content": "Plan approved!"})
-                else:
-                    # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                try:
+                    message_data = json.loads(data)
+                    if message_data.get("type") == "user_image":
+                        content = message_data.get("content", "")
+                        image_url = message_data.get("imageUrl", "")
+                        
+                        full_message = f"{content}\\n\\n[User uploaded image: {image_url}]"
+                        await client.send_message(active_session_id, full_message)
+                    else:
+                        await client.send_message(active_session_id, data)
+                except json.JSONDecodeError:
+                    if data.startswith("/approve"):
+                        await client.approve_plan(active_session_id)
+                        await websocket.send_json({"type": "system", "content": "Plan approved!"})
+                    else:
+                        await client.send_message(active_session_id, data)
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")
@@ -470,8 +511,9 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
         "timestamp": activity.get("createTime"),
     }
     
-    # Skip user activities UNLESS it's a userMessaged activity (we want to show those)
-    if result["originator"] == "user" and "userMessaged" not in activity:
+    # Skip all user-originated activities. The client adds them to the UI instantly,
+    # so we don't need to echo them back.
+    if result["originator"] == "user":
         return None
     
     # Plan Generated - show expandable steps
