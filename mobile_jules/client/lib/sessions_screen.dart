@@ -241,72 +241,77 @@ class _SessionsScreenState extends State<SessionsScreen> {
   void _showSessionDetails(Session session) {
     showModalBottomSheet(
       context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              session.displayTitle,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Status: ${session.statusText}',
-              style: TextStyle(color: session.statusColor),
-            ),
-            if (session.prompt != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Task: ${session.prompt}',
-                style: TextStyle(color: Colors.grey[600]),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-            const SizedBox(height: 16),
-            
-            // PRs Section
-            if (session.hasPR) ...[
-              const Text(
-                'Pull Requests',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ...session.pullRequests.map((pr) => Card(
-                color: Colors.green[50],
-                child: ListTile(
-                  leading: const Icon(Icons.merge, color: Colors.green),
-                  title: Text(pr.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(pr.url, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: const Icon(Icons.open_in_new),
-                  onTap: () => _openPR(pr),
-                ),
-              )).toList(),
-              const SizedBox(height: 16),
-            ],
-            
-            // Actions
-            Row(
+      isScrollControlled: true,
+      builder: (context) => SingleChildScrollView(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _reconnectToSession(session);
-                    },
-                    icon: const Icon(Icons.chat),
-                    label: const Text('Open Chat'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurple,
-                      foregroundColor: Colors.white,
-                    ),
+                Text(
+                  session.displayTitle,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Status: ${session.statusText}',
+                  style: TextStyle(color: session.statusColor),
+                ),
+                if (session.prompt != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Task: ${session.prompt}',
+                    style: TextStyle(color: Colors.grey[600]),
                   ),
+                ],
+                const SizedBox(height: 16),
+                
+                // PRs Section
+                if (session.hasPR) ...[
+                  const Text(
+                    'Pull Requests',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  ...session.pullRequests.map((pr) => Card(
+                    color: Colors.green[50],
+                    child: ListTile(
+                      leading: const Icon(Icons.merge, color: Colors.green),
+                      title: Text(pr.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(pr.url, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: const Icon(Icons.open_in_new),
+                      onTap: () => _openPR(pr),
+                    ),
+                  )).toList(),
+                  const SizedBox(height: 16),
+                ],
+                
+                // Actions
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _reconnectToSession(session);
+                        },
+                        icon: const Icon(Icons.chat),
+                        label: const Text('Open Chat'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepPurple,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
