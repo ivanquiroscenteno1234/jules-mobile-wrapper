@@ -59,3 +59,30 @@ jobs:
           GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
         run: python scripts/upload_with_oauth.py
+
+  repair:
+    name: Jules Repair Build
+    needs: build
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for Jules to create PRs with fixes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Invoke Jules via API
+        run: |
+          curl -X POST "https://jules.googleapis.com/v1alpha/sessions" \
+          -H "Content-Type: application/json" \
+          -H "X-Goog-Api-Key: ${{ secrets.JULES_API_KEY }}" \
+          -d '{
+            "prompt": "The Flutter Android build failed in GitHub Actions. Please analyze the repository and the build logs to fix the error. The project is a Flutter app located in mobile_jules/client/. Check AGENTS.md for project context.",
+            "sourceContext": {
+              "source": "sources/github/${{ github.repository }}",
+              "githubRepoContext": {
+                "startingBranch": "${{ github.ref_name }}"
+              }
+            },
+            "title": "Fix Build Failure on ${{ github.ref_name }}"
+          }'
