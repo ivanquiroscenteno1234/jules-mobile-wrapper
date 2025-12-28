@@ -23,6 +23,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? error;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -33,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -79,103 +81,126 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _stopSearching() {
+    setState(() {
+      _isSearching = false;
+      _searchController.clear();
+      _filterRepos('');
+      _searchFocusNode.unfocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: _isSearching
-            ? TextField(
-                controller: _searchController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search repositories...',
-                  border: InputBorder.none,
-                ),
-                onChanged: _filterRepos,
-              )
-            : const Text('Mobile Jules'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        actions: [
-          IconButton(
-            icon: Icon(_isSearching ? Icons.close : Icons.search),
-            onPressed: () {
-              setState(() {
-                _isSearching = !_isSearching;
-                if (!_isSearching) {
-                  _searchController.clear();
-                  _filterRepos('');
-                }
-              });
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.science),
-            tooltip: 'Test App',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const TestScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.dashboard),
-            tooltip: 'Dashboard',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DashboardScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Recent Sessions',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SessionsScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_copy_outlined),
-            tooltip: 'GitHub Repos',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const GitHubReposScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _showSettingsDialog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() {
-                isLoading = true;
-                error = null;
-              });
-              fetchRepos();
-            },
-          )
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : error != null
-              ? Center(
-                  child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(error!, style: const TextStyle(color: Colors.red)),
-                ))
-              : Column(
-                  children: [
-                    // Automation Mode Toggle
-                    Container(
+    return GestureDetector(
+      onTap: () {
+        if (_isSearching) {
+          _stopSearching();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: _isSearching
+              ? TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Search repositories...',
+                    border: InputBorder.none,
+                  ),
+                  onChanged: _filterRepos,
+                )
+              : const Text('Mobile Jules'),
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          actions: _isSearching
+              ? [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: _stopSearching,
+                  )
+                ]
+              : [
+                  IconButton(
+                    icon: const Icon(Icons.search),
+                    onPressed: () {
+                      setState(() {
+                        _isSearching = true;
+                        _searchFocusNode.requestFocus();
+                      });
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.science),
+                    tooltip: 'Test App',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const TestScreen()),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.dashboard),
+                    tooltip: 'Dashboard',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const DashboardScreen()),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.history),
+                    tooltip: 'Recent Sessions',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SessionsScreen()),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.folder_copy_outlined),
+                    tooltip: 'GitHub Repos',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const GitHubReposScreen()),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.settings),
+                    onPressed: _showSettingsDialog,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () {
+                      setState(() {
+                        isLoading = true;
+                        error = null;
+                      });
+                      fetchRepos();
+                    },
+                  )
+                ],
+        ),
+        body: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : error != null
+                ? Center(
+                    child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child:
+                        Text(error!, style: const TextStyle(color: Colors.red)),
+                  ))
+                : Column(
+                    children: [
+                      // Automation Mode Toggle
+                      Container(
                       margin: const EdgeInsets.all(16),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
