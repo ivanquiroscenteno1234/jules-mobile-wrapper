@@ -18,16 +18,28 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> repos = [];
+  List<dynamic> _filteredRepos = [];
   bool isLoading = true;
   String? error;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    print('[HomeScreen] Initializing state.');
     fetchRepos();
   }
 
+  @override
+  void dispose() {
+    print('[HomeScreen] Disposing state.');
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> fetchRepos() async {
+    print('[HomeScreen] Fetching repositories...');
     try {
       final response = await http.get(
         Uri.parse('${AppConfig.serverUrl}/repos'),
@@ -37,18 +49,39 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         setState(() {
           repos = json.decode(response.body);
+          _filteredRepos = repos;
           isLoading = false;
         });
+        print('[HomeScreen] Successfully fetched ${repos.length} repositories.');
       } else {
+        print('[HomeScreen] Failed to fetch repositories: ${response.statusCode}');
         setState(() {
           error = 'Failed to load repos: ${response.statusCode}';
           isLoading = false;
         });
       }
     } catch (e) {
+      print('[HomeScreen] Error fetching repositories: $e');
       setState(() {
         error = 'Error connecting to server: $e\n\nMake sure python server is running!';
         isLoading = false;
+      });
+    }
+  }
+
+  void _filterRepos(String query) {
+    print('[HomeScreen] Filtering repositories with query: "$query"');
+    if (query.isEmpty) {
+      setState(() {
+        _filteredRepos = repos;
+      });
+    } else {
+      setState(() {
+        _filteredRepos = repos
+            .where((repo) =>
+                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
+                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
+            .toList();
       });
     }
   }
@@ -57,9 +90,31 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mobile Jules'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search repositories...',
+                  border: InputBorder.none,
+                ),
+                onChanged: _filterRepos,
+              )
+            : const Text('Mobile Jules'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                  _filterRepos('');
+                }
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.science),
             tooltip: 'Test App',
@@ -181,7 +236,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const Spacer(),
                           Text(
-                            '${repos.length} repos',
+                            '${_filteredRepos.length} / ${repos.length} repos',
                             style: TextStyle(color: Colors.grey[600]),
                           ),
                         ],
@@ -192,9 +247,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Repos List
                     Expanded(
                       child: ListView.builder(
-                        itemCount: repos.length,
+                        itemCount: _filteredRepos.length,
                         itemBuilder: (context, index) {
-                          final repo = repos[index];
+                          final repo = _filteredRepos[index];
                           return Card(
                             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                             child: ListTile(
