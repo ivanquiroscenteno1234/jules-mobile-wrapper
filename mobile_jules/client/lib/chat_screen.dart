@@ -102,14 +102,16 @@ class ChatScreen extends StatefulWidget {
   final String? sessionId; // Optional for reconnecting
   final String? initialPrompt; // Auto-send on connect
   final bool autoMode; // Auto-create PR mode
+  final String? existingPrUrl; // Pass in existing PR URL
 
   const ChatScreen({
-    super.key, 
-    required this.repoName, 
-    this.sourceId,  // Now optional
+    super.key,
+    required this.repoName,
+    this.sourceId, // Now optional
     this.sessionId,
     this.initialPrompt,
     this.autoMode = false,
+    this.existingPrUrl,
   });
 
   @override
@@ -163,6 +165,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // Pre-fill PR URL if provided when reconnecting
+    if (widget.existingPrUrl != null) {
+      _createdPrUrl = widget.existingPrUrl;
+    }
+    
     _connect();
   }
 

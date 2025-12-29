@@ -173,6 +173,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
           repoName: session.displayTitle,
           sourceId: session.sourceContext ?? '',
           sessionId: session.name,
+          existingPrUrl: session.pullRequests.isNotEmpty ? session.pullRequests.first.url : null,
         ),
       ),
     );
