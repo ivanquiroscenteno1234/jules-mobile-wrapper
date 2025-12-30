@@ -83,17 +83,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: _isSearching
-            ? TextField(
-                controller: _searchController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search repositories...',
-                  border: InputBorder.none,
+        title: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: _isSearching
+              ? TextField(
+                  key: const ValueKey('searchField'),
+                  controller: _searchController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Search repositories...',
+                    border: InputBorder.none,
+                    hintStyle: TextStyle(color: Colors.black54),
+                  ),
+                  style: const TextStyle(color: Colors.black87),
+                  onChanged: _filterRepos,
+                )
+              : const Text(
+                  'Mobile Jules',
+                  key: ValueKey('titleText'),
                 ),
-                onChanged: _filterRepos,
-              )
-            : const Text('Mobile Jules'),
+        ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
@@ -108,60 +117,62 @@ class _HomeScreenState extends State<HomeScreen> {
               });
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.science),
-            tooltip: 'Test App',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const TestScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.dashboard),
-            tooltip: 'Dashboard',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DashboardScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Recent Sessions',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SessionsScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_copy_outlined),
-            tooltip: 'GitHub Repos',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const GitHubReposScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _showSettingsDialog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() {
-                isLoading = true;
-                error = null;
-              });
-              fetchRepos();
-            },
-          )
+          if (!_isSearching) ...[
+            IconButton(
+              icon: const Icon(Icons.science),
+              tooltip: 'Test App',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const TestScreen()),
+                );
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.dashboard),
+              tooltip: 'Dashboard',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                );
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.history),
+              tooltip: 'Recent Sessions',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SessionsScreen()),
+                );
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.folder_copy_outlined),
+              tooltip: 'GitHub Repos',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const GitHubReposScreen()),
+                );
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: _showSettingsDialog,
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                setState(() {
+                  isLoading = true;
+                  error = null;
+                });
+                fetchRepos();
+              },
+            ),
+          ],
         ],
       ),
       body: isLoading
