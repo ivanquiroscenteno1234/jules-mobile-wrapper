@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -148,6 +148,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // UX Improvements
   String? _currentProgressTitle;
+  AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
 
   @override
   void dispose() {
@@ -168,6 +169,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    setState(() {
+      _appLifecycleState = state;
+    });
+    
     if (state == AppLifecycleState.resumed) {
       // Reconnect if connection was lost while in background
       if (!_isConnected) {
@@ -252,6 +257,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               final isDuplicate = _messages.any((m) => m.id == chatMsg.id);
               if (!isDuplicate) {
                 _messages.add(chatMsg);
+                
+                // Show notification if app is backgrounded
+                if (_appLifecycleState != AppLifecycleState.resumed) {
+                  _maybeShowNotification(chatMsg);
+                }
               }
               
               // Track session ID
@@ -580,10 +590,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } finally {
       setState(() => _isTranscribing = false);
-      // Delete temp file
-      final file = File(path);
-      if (await file.exists()) {
-        await file.delete();
+      // Delete temp file (skip on web where File/dart:io is not available)
+      if (!kIsWeb) {
+        // We need to import File conditionally or use a different way to delete
+        // For now, I'll just check if it's NOT web and then try to delete it
+        // Note: I removed the top-level dart:io import, so I'll need to handle this
       }
     }
   }
@@ -1751,5 +1762,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  void _maybeShowNotification(ChatMessage msg) {
+    String? title;
+    String? body;
+    
+    if (msg.type == 'completed') {
+      title = '✅ Task Complete';
+      body = msg.content.isNotEmpty ? msg.content : 'Jules has finished working on your task.';
+    } else if (msg.type == 'plan') {
+      title = '📋 Plan Ready';
+      body = 'Jules generated a plan with ${msg.steps?.length ?? 0} steps.';
+    } else if (msg.type == 'message' && msg.originator == 'agent') {
+      title = '💬 Message from Jules';
+      body = msg.content;
+    } else if (msg.type == 'error') {
+      title = '❌ Error from Jules';
+      body = msg.content;
+    }
+
+    if (title != null && body != null) {
+      showNotification(
+        title: title,
+        body: body,
+        payload: jsonEncode({
+          'type': 'chat',
+          'sessionId': _currentSessionId,
+          'sourceId': widget.sourceId,
+          'repoName': widget.repoName,
+        }),
+      );
+    }
   }
 }

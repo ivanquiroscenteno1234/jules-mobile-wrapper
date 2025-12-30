@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'config.dart';
+import 'main.dart' show showNotification;
 
 class TestScreen extends StatefulWidget {
   const TestScreen({super.key});
@@ -140,6 +142,41 @@ class _TestScreenState extends State<TestScreen> {
                         color: isDark ? Colors.white70 : Colors.grey[600],
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        showNotification(
+                          title: '🧪 System Test',
+                          body: 'Notifications are working! This will appear in your tray on a real phone.',
+                          payload: json.encode({
+                            'type': 'test',
+                            'message': 'This is a test notification'
+                          }),
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Test notification sent! Check your tray (or console if on web).')),
+                        );
+                      },
+                      icon: const Icon(Icons.notifications_active),
+                      label: const Text('Test Notification Tray'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[600],
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Note: On web, notifications are logged to the browser console.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          color: isDark ? Colors.white54 : Colors.grey[600],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

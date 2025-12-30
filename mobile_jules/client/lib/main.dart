@@ -1,14 +1,18 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
+import 'chat_screen.dart';
 import 'config.dart';
 
 // Global notification plugin instance
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+
+// Global navigator key to allow navigation without context
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,10 +49,33 @@ Future<void> _initNotifications() async {
     iOS: initializationSettingsIOS,
   );
 
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: (NotificationResponse response) {
+      if (response.payload != null) {
+        debugPrint('Notification payload: ${response.payload}');
+        // Handle navigation based on payload
+        try {
+          final data = jsonDecode(response.payload!);
+          if (data['type'] == 'chat' && data['sessionId'] != null) {
+            navigatorKey.currentState?.pushNamed(
+              '/chat',
+              arguments: {
+                'sessionId': data['sessionId'],
+                'sourceId': data['sourceId'] ?? '',
+                'repoName': data['repoName'] ?? 'Jules Session',
+              },
+            );
+          }
+        } catch (e) {
+          debugPrint('Error handling notification tap: $e');
+        }
+      }
+    },
+  );
   
   // Request permissions on Android 13+ (skip on web)
-  if (!kIsWeb && Platform.isAndroid) {
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     await flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
@@ -62,6 +89,13 @@ Future<void> showNotification({
   required String body,
   String? payload,
 }) async {
+  // If on web, we can't show system notifications via this plugin,
+  // but we can log them for debugging
+  if (kIsWeb) {
+    debugPrint('🔔 WEB NOTIFICATION: $title - $body (Payload: $payload)');
+    return;
+  }
+
   const AndroidNotificationDetails androidNotificationDetails =
       AndroidNotificationDetails(
     'jules_channel',
@@ -126,7 +160,21 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mobile Jules',
+      navigatorKey: navigatorKey,
       themeMode: _themeMode,
+      onGenerateRoute: (settings) {
+        if (settings.name == '/chat') {
+          final args = settings.arguments as Map<String, dynamic>;
+          return MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              sessionId: args['sessionId'],
+              sourceId: args['sourceId'],
+              repoName: args['repoName'],
+            ),
+          );
+        }
+        return null;
+      },
       
       // Light Theme
       theme: ThemeData(
