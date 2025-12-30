@@ -122,6 +122,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late WebSocketChannel _channel;
   final List<ChatMessage> _messages = [];
   bool _isConnected = false;
+  bool _isConnecting = false;
   bool _isWaiting = false; // Start as false - button should be enabled for new sessions
   String? _currentSessionId;
   String? _pendingPlanId;
@@ -217,9 +218,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     
     try {
+      setState(() {
+        _isConnecting = true;
+      });
+      
       _channel = WebSocketChannel.connect(Uri.parse(uri));
+      
+      // Wait for connection to be established
+      await _channel.ready;
+      
       setState(() {
         _isConnected = true;
+        _isConnecting = false;
       });
       
       // Auto-send initial prompt if provided
@@ -328,6 +338,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               content: 'Connection Error: $error',
             ));
             _isConnected = false;
+            _isConnecting = false;
             _isWaiting = false;
           });
         },
@@ -339,6 +350,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               content: 'Disconnected.',
             ));
             _isConnected = false;
+            _isConnecting = false;
             _isWaiting = false;
           });
         },
@@ -351,6 +363,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           content: 'Could not connect: $e',
         ));
         _isConnected = false;
+        _isConnecting = false;
         _isWaiting = false;
       });
     }
@@ -823,6 +836,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
+          if (_isConnecting)
+            const LinearProgressIndicator(
+              minHeight: 2,
+              backgroundColor: Colors.transparent,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+            ),
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
