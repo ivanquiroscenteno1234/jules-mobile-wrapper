@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
@@ -28,6 +30,7 @@ class ChatMessage {
   final bool? isWaiting;
   final bool? hasPatch;
   final String? sessionId;
+  final String? imageUrl;
   final List<Map<String, dynamic>>? artifacts;
 
   ChatMessage({
@@ -46,6 +49,7 @@ class ChatMessage {
     this.isWaiting,
     this.hasPatch,
     this.sessionId,
+    this.imageUrl,
     this.artifacts,
   });
 
@@ -66,16 +70,18 @@ class ChatMessage {
       isWaiting: json['isWaiting'],
       hasPatch: json['hasPatch'],
       sessionId: json['sessionId'],
+      imageUrl: json['imageUrl'],
       artifacts: json['artifacts'] != null ? List<Map<String, dynamic>>.from(json['artifacts']) : null,
     );
   }
 
-  factory ChatMessage.user(String text) {
+  factory ChatMessage.user(String text, {String? imageUrl}) {
     return ChatMessage(
       id: 'user_${DateTime.now().millisecondsSinceEpoch}',
       type: 'user',
       originator: 'user',
       content: text,
+      imageUrl: imageUrl,
     );
   }
 }
@@ -146,6 +152,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   bool _isTranscribing = false;
+
+  // Image upload
+  final ImagePicker _picker = ImagePicker();
+  XFile? _pickedImage;
+  bool _isUploading = false;
 
   // UX Improvements
   String? _currentProgressTitle;
@@ -382,8 +393,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _sendMessage() {
-    if (_controller.text.isNotEmpty && _isConnected) {
-      _sendMessageText(_controller.text);
+    if ((_controller.text.isNotEmpty || _pickedImage != null) && _isConnected) {
+      if (_pickedImage != null) {
+        _uploadImageAndSend();
+      } else {
+        _sendMessageText(_controller.text);
+      }
       _controller.clear();
     }
   }
@@ -406,6 +421,90 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() {
         _pendingPlanId = null;
         _isWaiting = true;  // Show working indicator after approval
+      });
+    }
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      setState(() {
+        _pickedImage = image;
+      });
+    } catch (e) {
+      print('Error picking image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _uploadImageAndSend() async {
+    if (_pickedImage == null) return;
+    
+    setState(() {
+      _isUploading = true;
+      _isWaiting = true; // Show working indicator
+      // Add local message with image preview immediately
+      _messages.add(ChatMessage.user(
+        _controller.text, 
+        imageUrl: _pickedImage!.path
+      ));
+      _scrollToBottom();
+    });
+    
+    final originalPickedImage = _pickedImage;
+    final originalText = _controller.text;
+    
+    // Clear the input fields after capturing their state
+    setState(() {
+      _pickedImage = null;
+      _controller.clear();
+    });
+
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${AppConfig.serverUrl}/upload-image'),
+      );
+      request.headers['ngrok-skip-browser-warning'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('file', originalPickedImage!.path));
+      
+      final response = await request.send();
+      
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        final filename = data['filename'];
+        
+        // Send JSON message with both text and filename
+        final messagePayload = jsonEncode({
+          'text': originalText,
+          'image_filename': filename,
+        });
+        
+        _channel.sink.add(messagePayload);
+        
+      } else {
+        throw Exception('Image upload failed with status: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error uploading image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send image: $e')),
+        );
+      }
+      // OPTIONAL: You might want to remove the optimistic message on failure
+      setState(() {
+        _messages.removeWhere((msg) => msg.imageUrl == originalPickedImage!.path);
+      });
+    } finally {
+      setState(() {
+        _isUploading = false;
+        // _isWaiting is controlled by server responses now
       });
     }
   }
@@ -946,10 +1045,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          
+          if (_pickedImage != null) _buildImagePreview(),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: const Icon(Icons.attach_file, color: Colors.deepPurple),
+                  onPressed: _pickImage,
+                  tooltip: 'Attach Image',
+                ),
                 IconButton(
                   icon: _isRecording 
                       ? const Icon(Icons.stop, color: Colors.red) 
@@ -979,12 +1085,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.send),
+                  icon: _isUploading 
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send),
                   color: Colors.deepPurple,
-                  onPressed: _isWaiting ? null : _sendMessage,
+                  onPressed: (_isWaiting || _isUploading) ? null : _sendMessage,
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      child: Stack(
+        alignment: Alignment.topRight,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8.0),
+            child: Image.file(
+              File(_pickedImage!.path),
+              height: 100,
+              width: 100,
+              fit: BoxFit.cover,
+            ),
+          ),
+          IconButton(
+            icon: const CircleAvatar(
+              backgroundColor: Colors.black54,
+              child: Icon(Icons.close, color: Colors.white, size: 18),
+            ),
+            onPressed: () {
+              setState(() {
+                _pickedImage = null;
+              });
+            },
           ),
         ],
       ),
@@ -1032,7 +1171,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return _buildSystemBubble(msg);
       default:
         // Skip empty messages
-        if (msg.content.isEmpty) {
+        if (msg.content.isEmpty && msg.imageUrl == null) {
           return const SizedBox.shrink();
         }
         return _buildJulesBubble(msg);
@@ -1764,6 +1903,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildBubbleContent(ChatMessage msg) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasImage = msg.imageUrl != null && msg.imageUrl!.isNotEmpty;
+    final hasText = msg.content.isNotEmpty;
+
+    Widget imageWidget = const SizedBox.shrink();
+    if (hasImage) {
+      if (msg.imageUrl!.startsWith('/')) { // Local file
+        imageWidget = Image.file(File(msg.imageUrl!));
+      } else { // Remote file
+        imageWidget = Image.network('${AppConfig.serverUrl}/uploads/${msg.imageUrl!}');
+      }
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasImage) 
+          Padding(
+            padding: EdgeInsets.only(bottom: hasText ? 8.0 : 0.0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8.0),
+              child: imageWidget,
+            ),
+          ),
+        if (hasText)
+          Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+      ],
+    );
+  }
+
   Widget _buildUserBubble(ChatMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Align(
@@ -1775,7 +1945,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? Colors.deepPurple[700] : Colors.deepPurple[100],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+        child: _buildBubbleContent(msg),
       ),
     );
   }
@@ -1812,7 +1982,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+        child: _buildBubbleContent(msg),
       ),
     );
   }

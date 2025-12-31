@@ -1,6 +1,7 @@
 import os
 import httpx
 import asyncio
+import base64
 from typing import List, Dict, Optional
 
 class JulesClient:
@@ -85,14 +86,29 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def send_message(self, session_id: str, message: str):
+    async def send_message(self, session_id: str, message: str, image_filename: Optional[str] = None):
         """Sends a user message to an existing session."""
-        # Note: session_id usually comes in full form "sessions/123..."
-        # If the API expects just the ID, we might need to parse it, 
-        # but the docs show using the full resource name in the URL.
         url = f"{self.base_url}/{session_id}:sendMessage"
         
         payload = {"prompt": message}
+
+        if image_filename:
+            image_path = os.path.join("uploads", image_filename)
+            if os.path.exists(image_path):
+                try:
+                    with open(image_path, "rb") as image_file:
+                        encoded_string = base64.b64encode(image_file.read()).decode()
+                    
+                    payload["visualContexts"] = [
+                        {
+                            "image": {
+                                "data": encoded_string
+                            }
+                        }
+                    ]
+                except Exception as e:
+                    print(f"Error processing image file: {e}")
+
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
@@ -100,8 +116,6 @@ class JulesClient:
                 json=payload
             )
             resp.raise_for_status()
-            # The response is usually empty or the updated session object; 
-            # we rely on list_activities to get the actual answer.
             return resp.json()
 
     async def get_session(self, session_id: str) -> Dict:
@@ -122,7 +136,6 @@ class JulesClient:
         Returns:
             True if deletion was successful
         """
-        # Ensure session_id has correct format (sessions/ID)
         if not session_id.startswith("sessions/"):
             session_id = f"sessions/{session_id}"
         
@@ -166,15 +179,12 @@ class JulesClient:
                 activities = data.get("activities", [])
                 all_activities.extend(activities)
                 
-                # Check for more pages
                 page_token = data.get("nextPageToken")
                 if not page_token or not get_all:
-                    # If not getting all, just return first page
                     break
                     
             print(f"DEBUG list_activities: fetched {len(all_activities)} activities total")
             
-            # Return ALL activities in chronological order
             return all_activities
 
     async def approve_plan(self, session_id: str) -> Dict:
@@ -191,63 +201,8 @@ class JulesClient:
         """The Jules API doesn't support direct publishing via API.
         This method returns info for the client to open Jules Web.
         """
-        # We don't perform an API call here because research shows it doesn't exist.
-        # Instead we return information for the UI to guide the user.
         return {
             "status": "web_fallback",
             "message": "Publishing must be done through the Jules Web UI or via AUTO_CREATE_PR mode.",
             "url": f"https://jules.google.com/{session_id}" if not session_id.startswith("http") else session_id
         }
-
-# --- MOCK CLIENT FOR TESTING WITHOUT API KEY ---
-
-class MockJulesClient(JulesClient):
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        self.mock_session_id = "sessions/mock-123"
-        self.messages = [] # Store chat history
-
-    async def list_sources(self) -> List[Dict]:
-        return [
-            {
-                "name": "sources/github/user/repo-a",
-                "id": "github/user/repo-a",
-                "githubRepo": {"owner": "user", "repo": "repo-a"}
-            },
-            {
-                "name": "sources/github/user/repo-b",
-                "id": "github/user/repo-b",
-                "githubRepo": {"owner": "user", "repo": "repo-b"}
-            }
-        ]
-
-    async def create_session(self, source_id: str, prompt: str = "Start session") -> Dict:
-        return {
-            "name": self.mock_session_id,
-            "id": "mock-123",
-            "title": "Mock Session",
-            "sourceContext": {"source": source_id}
-        }
-
-    async def send_message(self, session_id: str, message: str):
-        # Simulate user message
-        self.messages.append({
-            "name": f"{session_id}/activities/user-{len(self.messages)}",
-            "originator": "user",
-            "createTime": "2025-01-01T12:00:00Z",
-            "text": message # Simplifying structure for mock
-        })
-        # Simulate agent response
-        self.messages.append({
-            "name": f"{session_id}/activities/agent-{len(self.messages)}",
-            "originator": "agent",
-            "createTime": "2025-01-01T12:00:01Z",
-            "progressUpdated": {
-                "title": "Thinking...",
-                "description": f"I received your message: '{message}'. Here is a mock response."
-            }
-        })
-        return {}
-
-    async def list_activities(self, session_id: str, page_size: int = 30) -> List[Dict]:
-        return self.messages

@@ -6,12 +6,12 @@ import json
 import asyncio
 import uuid
 from typing import List, Dict, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
-import google.generativeai as genai
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import shutil
 
 # Import the Client
 from jules_client import JulesClient
@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 # Configuration
 API_KEY = os.environ.get("JULES_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+UPLOAD_DIR = "uploads"
 
 # Initialize Gemini for STT
 if GEMINI_API_KEY:
@@ -46,11 +47,16 @@ session_poller = SessionPoller(client, notification_service)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the session polling background task."""
+    # Create upload directory if it doesn't exist
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     asyncio.create_task(session_poller.start_polling(interval_seconds=30))
     print("Session Poller started.")
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+# Mount the uploads directory to serve static files
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -636,6 +642,24 @@ async def create_github_pr(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Handles image uploads, saves them, and returns the filename."""
+    try:
+        # Create a unique name
+        original_filename = file.filename if file.filename else "image"
+        extension = os.path.splitext(original_filename)[1]
+        unique_filename = f"{uuid.uuid4()}{extension}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        # Save the file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {"filename": unique_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
+
 
 # Repoless WebSocket endpoint - no source_id required
 @app.websocket("/chat")
@@ -838,8 +862,17 @@ async def _handle_websocket(
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
-                    # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    # Handle JSON for image support or plain text for backward compatibility
+                    try:
+                        message_data = json.loads(data)
+                        text = message_data.get("text", "")
+                        image_filename = message_data.get("image_filename")
+                    except json.JSONDecodeError:
+                        text = data
+                        image_filename = None
+                    
+                    # Send message to Jules, potentially with an image
+                    await client.send_message(active_session_id, text, image_filename=image_filename)
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")
