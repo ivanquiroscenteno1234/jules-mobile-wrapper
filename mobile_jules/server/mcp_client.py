@@ -66,7 +66,13 @@ class PlaywrightMCPClient:
             return True
         
         try:
-            self._context_manager = sse_client(self.base_url)
+            # Use sse_client with custom timeouts
+            # Note: timeout is for connection, sse_read_timeout is for the stream
+            self._context_manager = sse_client(
+                self.base_url, 
+                timeout=30.0, 
+                sse_read_timeout=300.0  # 5 minutes
+            )
             streams = await self._context_manager.__aenter__()
             self._read_stream, self._write_stream = streams
             
@@ -87,14 +93,35 @@ class PlaywrightMCPClient:
             return False
     
     async def disconnect(self):
-        """Disconnect from the MCP server. Note: We don't close async contexts to avoid task issues."""
-        # Just clear the references - don't try to close the async context managers
-        # The SSE connection will be cleaned up when the server shuts down
+        """Disconnect from the MCP server and clean up resources."""
+        # Try to properly exit the session context
+        if self._session:
+            try:
+                # We don't use __aexit__ directly if we can avoid it to prevent task context errors,
+                # but for SSE we really need to close the underlying httpx client.
+                # If we get a RuntimeError, we'll just ignore it and clear references.
+                await self._session_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+        
+        # Try to properly exit the SSE context (this closes the httpx client)
+        if self._context_manager:
+            try:
+                await self._context_manager.__aexit__(None, None, None)
+            except Exception:
+                pass
+        
+        # Clear all references
         self._session = None
         self._session_context = None
         self._context_manager = None
         self._read_stream = None
         self._write_stream = None
+    
+    async def reconnect(self) -> bool:
+        """Force a reconnection (useful after idle timeout)."""
+        await self.disconnect()
+        return await self.connect()
     
     async def call_tool(self, tool_name: str, params: Dict[str, Any] = None) -> Any:
         """Call an MCP tool."""

@@ -101,6 +101,32 @@ class _TestScreenState extends State<TestScreen> {
     }
   }
 
+  Future<void> _cancelTest() async {
+    if (_testId == null) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.serverUrl}/test/cancel/$_testId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _isRunning = false;
+          _pollTimer?.cancel();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Test cancelled')),
+        );
+      }
+    } catch (e) {
+      print('Error cancelling test: $e');
+    }
+  }
+
   void _startPolling() {
     _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       await _fetchTestStatus();
@@ -287,22 +313,48 @@ class _TestScreenState extends State<TestScreen> {
             
             const SizedBox(height: 16),
             
-            // Start Button
-            ElevatedButton.icon(
-              onPressed: _isRunning ? null : _startTest,
-              icon: _isRunning 
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.play_arrow),
-              label: Text(_isRunning ? 'Testing...' : 'Start Test'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.all(16),
-                backgroundColor: Colors.deepPurple,
-                foregroundColor: Colors.white,
-              ),
+            // Start/Cancel Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _isRunning ? null : _startTest,
+                    icon: _isRunning 
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.play_arrow),
+                    label: Text(_isRunning ? 'Testing...' : 'Start Test'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.all(16),
+                      backgroundColor: Colors.deepPurple,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.deepPurple[200],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                if (_isRunning) ...[
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: _cancelTest,
+                    icon: const Icon(Icons.cancel),
+                    label: const Text('Cancel'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.all(16),
+                      backgroundColor: Colors.red[400],
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             
             const SizedBox(height: 24),

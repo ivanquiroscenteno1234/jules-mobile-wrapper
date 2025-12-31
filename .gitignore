@@ -5,6 +5,8 @@ __pycache__/
 *.json
 !package.json
 !package-lock.json
+!test_urls.json
+!test_presets.json
 *.pem
 *.key
 .env

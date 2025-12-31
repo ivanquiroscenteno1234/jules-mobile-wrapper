@@ -1053,8 +1053,7 @@ async def start_test(request: TestRequest):
     save_url_to_history(request.url)
     
     # Start the test as a background async task in the current event loop
-    # This works because we're in an async endpoint (not using background_tasks)
-    asyncio.create_task(
+    task = asyncio.create_task(
         tester_agent.run_test(
             test_id, 
             request.url, 
@@ -1063,6 +1062,8 @@ async def start_test(request: TestRequest):
             password=request.password
         )
     )
+    # Register the task so it can be canceled
+    tester_agent.active_tasks[test_id] = task
     
     # Small delay to ensure test is registered
     await asyncio.sleep(0.1)
@@ -1080,7 +1081,15 @@ async def get_test_status(test_id: str):
     result = tester_agent.get_test(test_id)
     if not result:
         raise HTTPException(status_code=404, detail="Test not found")
-    return tester_agent.to_json(result)
+    return result
+
+@app.post("/test/cancel/{test_id}")
+async def cancel_test(test_id: str):
+    """Cancel a running test."""
+    success = await tester_agent.cancel_test(test_id)
+    if not success:
+        return {"status": "error", "message": "Test not found or not running"}
+    return {"status": "canceled", "test_id": test_id}
 
 @app.get("/test/urls")
 async def get_test_urls():

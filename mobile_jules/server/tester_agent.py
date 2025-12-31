@@ -78,6 +78,28 @@ class TesterAgent:
         
         self.mcp = None  # MCP Browser Adapter
         self.tests: Dict[str, TestResult] = {}
+        self.active_tasks: Dict[str, asyncio.Task] = {}
+        self.use_screenshots = True  # Re-enabled to help with testing
+    
+    async def cancel_test(self, test_id: str) -> bool:
+        """Cancel a running test and clean up resources."""
+        if test_id in self.active_tasks:
+            task = self.active_tasks[test_id]
+            if not task.done():
+                task.cancel()
+                print(f"🛑 Test {test_id} canceled by user.")
+            
+            # Update test status
+            if test_id in self.tests:
+                self.tests[test_id].status = "failed"
+                self.tests[test_id].final_verdict = "Test canceled by user"
+            
+            # Clean up browser/MCP
+            if self.mcp:
+                await self.mcp.close()
+            
+            return True
+        return False
     
     async def _init_browser(self):
         """Initialize browser via MCP."""
@@ -85,7 +107,8 @@ class TesterAgent:
             from mcp_adapter import get_mcp_adapter
             
             self.mcp = get_mcp_adapter()
-            success = await self.mcp.launch()
+            # Force reconnect to avoid stale SSE sessions (ReadTimeout)
+            success = await self.mcp.launch(force_reconnect=True)
             if not success:
                 print("⚠️ MCP server not available. Start with:")
                 print("   npx @executeautomation/playwright-mcp-server --port 8931")
@@ -119,7 +142,7 @@ class TesterAgent:
     
     async def _take_screenshot(self) -> str:
         """Take a screenshot via MCP and return as base64."""
-        if not self.mcp:
+        if not self.mcp or not self.use_screenshots:
             return ""
         
         try:
@@ -397,6 +420,7 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                     break
                 
                 # Execute action
+                print(f"   Executing: {action} on {target or value}", flush=True)
                 success = await self._execute_action(action, target, value)
                 
                 # Store step
@@ -412,6 +436,9 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                     screenshot=screenshot
                 )
                 result.steps.append(step)
+                
+                # Wait for page to react
+                await asyncio.sleep(2)
                 
                 if not success:
                     # Optional: wait and retry or just continue to next logic step

@@ -24,8 +24,13 @@ class MCPBrowserAdapter:
         self._launched = False
         self._current_url: Optional[str] = None
     
-    async def launch(self) -> bool:
-        """Launch/connect to the browser via MCP."""
+    async def launch(self, force_reconnect: bool = False) -> bool:
+        """Launch/connect to the browser via MCP.
+        
+        Args:
+            force_reconnect: If True, disconnect existing connection and reconnect fresh.
+                           Useful to avoid stale SSE connections after idle periods.
+        """
         self.mcp = get_mcp_client()
         
         is_running = await self.mcp.is_server_running()
@@ -34,7 +39,13 @@ class MCPBrowserAdapter:
             print("   npx @executeautomation/playwright-mcp-server --port 8931")
             return False
         
-        connected = await self.mcp.connect()
+        # Force fresh connection if requested or if already launched (subsequent test)
+        if force_reconnect or self._launched:
+            print("🔄 Reconnecting MCP for fresh session...")
+            connected = await self.mcp.reconnect()
+        else:
+            connected = await self.mcp.connect()
+            
         if not connected:
             print("⚠️ Failed to connect to MCP server")
             return False
