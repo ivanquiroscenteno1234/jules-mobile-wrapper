@@ -47,3 +47,8 @@ Thumbs.db
 
 # Node (if any)
 node_modules/
+
+test_urls.json
+test_presets.json
+credentials.json
+secret.key

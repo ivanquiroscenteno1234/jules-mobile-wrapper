@@ -159,6 +159,13 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             IconButton(
+              icon: const Icon(Icons.lock_outline),
+              tooltip: 'Manage Credentials',
+              onPressed: () {
+                Navigator.pushNamed(context, '/creds');
+              },
+            ),
+            IconButton(
               icon: const Icon(Icons.settings),
               onPressed: _showSettingsDialog,
             ),
@@ -186,94 +193,124 @@ class _HomeScreenState extends State<HomeScreen> {
               : Column(
                   children: [
                     // Automation Mode Toggle
-                    Container(
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple[50],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.auto_mode, color: Colors.deepPurple),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Auto Mode',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                Text(
-                                  AppConfig.autoMode
-                                      ? 'Auto-approve plans & create PRs'
-                                      : 'Manual plan approval',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                                ),
-                              ],
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: _buildGlassCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.deepPurple.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.auto_mode, color: Colors.deepPurple),
                             ),
-                          ),
-                          Switch(
-                            value: AppConfig.autoMode,
-                            onChanged: (value) {
-                              setState(() {
-                                AppConfig.autoMode = value;
-                              });
-                            },
-                            activeColor: Colors.deepPurple,
-                          ),
-                        ],
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Auto Mode',
+                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(
+                                    AppConfig.autoMode
+                                        ? 'Auto-approve plans & create PRs'
+                                        : 'Manual plan approval',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              value: AppConfig.autoMode,
+                              onChanged: (value) {
+                                setState(() {
+                                  AppConfig.autoMode = value;
+                                });
+                              },
+                              activeColor: Colors.deepPurple,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     
                     // Section Title
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                       child: Row(
                         children: [
-                          const Icon(Icons.folder, color: Colors.deepPurple),
+                          const Icon(Icons.folder, color: Colors.deepPurple, size: 20),
                           const SizedBox(width: 8),
                           const Text(
                             'Your Repositories',
                             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           const Spacer(),
-                          Text(
-                            '${_filteredRepos.length} repos',
-                            style: TextStyle(color: Colors.grey[600]),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.deepPurple.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              '${_filteredRepos.length}',
+                              style: const TextStyle(
+                                fontSize: 12, 
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepPurple
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    
                     // Repos List
                     Expanded(
                       child: ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 80, top: 8),
                         itemCount: _filteredRepos.length,
                         itemBuilder: (context, index) {
                           final repo = _filteredRepos[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: Colors.deepPurple[100],
-                                child: const Icon(Icons.code, color: Colors.deepPurple),
-                              ),
-                              title: Text(repo['name']),
-                              subtitle: Text(repo['full_name']),
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ChatScreen(
-                                      repoName: repo['name'],
-                                      sourceId: repo['id'],
-                                    ),
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                            child: _buildGlassCard(
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                leading: Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.deepPurple.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
-                                );
-                              },
+                                  child: const Icon(Icons.code, color: Colors.deepPurple, size: 24),
+                                ),
+                                title: Text(
+                                  repo['name'],
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Text(
+                                  repo['full_name'],
+                                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                ),
+                                trailing: const Icon(Icons.chevron_right, color: Colors.deepPurple),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ChatScreen(
+                                        repoName: repo['name'],
+                                        sourceId: repo['id'],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           );
                         },
@@ -287,6 +324,38 @@ class _HomeScreenState extends State<HomeScreen> {
         label: const Text('New Task'),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
+      ),
+    );
+  }
+
+  Widget _buildGlassCard({required Widget child, EdgeInsetsGeometry? padding}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark 
+          ? Colors.white.withOpacity(0.07) 
+          : Colors.white.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark 
+            ? Colors.white.withOpacity(0.12) 
+            : Colors.deepPurple.withOpacity(0.15),
+          width: 0.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: padding ?? const EdgeInsets.all(0),
+          child: child,
+        ),
       ),
     );
   }

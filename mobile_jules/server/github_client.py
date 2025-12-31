@@ -122,6 +122,36 @@ class GitHubClient:
             branches = response.json()
             return [{"name": b["name"], "protected": b.get("protected", False)} for b in branches]
     
+    async def get_branch_diff(self, owner: str, repo: str, base: str, head: str) -> str:
+        """
+        Get diff between two branches using GitHub compare API.
+        
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            base: Base branch (e.g., 'main')
+            head: Head branch to compare
+            
+        Returns:
+            The diff as a string, or empty string if comparison fails
+        """
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Request diff format
+                headers = {**self.headers, "Accept": "application/vnd.github.v3.diff"}
+                response = await client.get(
+                    f"{self.base_url}/repos/{owner}/{repo}/compare/{base}...{head}",
+                    headers=headers
+                )
+                if response.status_code == 200:
+                    return response.text
+                else:
+                    print(f"GitHub compare returned {response.status_code}")
+                    return ""
+        except Exception as e:
+            print(f"GitHub compare error: {e}")
+            return ""
+    
     async def create_pr_from_patch(
         self,
         owner: str,

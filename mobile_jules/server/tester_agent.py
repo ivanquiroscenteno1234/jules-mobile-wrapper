@@ -41,6 +41,8 @@ class TestStep:
     success: bool = True
     screenshot: Optional[str] = None  # Base64 encoded
     error: Optional[str] = None
+    alternative_selectors: Optional[List[str]] = None
+    debug_info: Optional[Dict] = None
 
 
 @dataclass
@@ -52,6 +54,7 @@ class TestResult:
     status: str  # running, passed, failed
     steps: List[TestStep]
     started_at: str
+    thinking: Optional[str] = None
     completed_at: Optional[str] = None
     final_verdict: Optional[str] = None
 
@@ -80,7 +83,40 @@ class TesterAgent:
         self.tests: Dict[str, TestResult] = {}
         self.active_tasks: Dict[str, asyncio.Task] = {}
         self.use_screenshots = True  # Re-enabled to help with testing
+        
+        self.HISTORY_FILE = "test_history.json"
+        self._load_history()
     
+    def _load_history(self):
+        """Load test history from JSON file."""
+        if os.path.exists(self.HISTORY_FILE):
+            try:
+                with open(self.HISTORY_FILE, "r") as f:
+                    data = json.load(f)
+                    for test_id, test_data in data.items():
+                        # Unpack steps
+                        steps = []
+                        for s in test_data.get("steps", []):
+                            steps.append(TestStep(**s))
+                        
+                        # Create TestResult
+                        test_data["steps"] = steps
+                        self.tests[test_id] = TestResult(**test_data)
+                print(f"✅ Loaded {len(self.tests)} tests from history.")
+            except Exception as e:
+                print(f"⚠️ Error loading test history: {e}")
+                self.tests = {}
+
+    def _save_history(self):
+        """Save test history to JSON file."""
+        try:
+            # Convert TestResult objects to dicts
+            data = {tid: asdict(tr) for tid, tr in self.tests.items()}
+            with open(self.HISTORY_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"⚠️ Error saving test history: {e}")
+
     async def cancel_test(self, test_id: str) -> bool:
         """Cancel a running test and clean up resources."""
         if test_id in self.active_tasks:
@@ -93,6 +129,7 @@ class TesterAgent:
             if test_id in self.tests:
                 self.tests[test_id].status = "failed"
                 self.tests[test_id].final_verdict = "Test canceled by user"
+                self._save_history()
             
             # Clean up browser/MCP
             if self.mcp:
@@ -174,7 +211,8 @@ class TesterAgent:
             return ""
     
     async def _ask_gemini(self, screenshot_b64: str, objective: str, history: List[TestStep], 
-                     snapshot: str = "", username: str = None, password: str = None) -> Dict:
+                     snapshot: str = "", username: str = None, password: str = None,
+                     deeper_analysis: bool = False) -> Dict:
         """Ask Gemini what to do next using the new google-genai Client API."""
         
         if not self.client:
@@ -211,6 +249,10 @@ Analyze the screenshot and provide your next step as a JSON object with these fi
 - "value": Text to type (for "type" action) or wait time in ms (for "wait")
 - "confidence": 0.0-1.0
 - "is_objective_met": true/false
+- "alternative_selectors": List of 2-3 other selectors that would work for this action
+- "debug_map": Simple dict of 2-3 key elements found (e.g., {{"login_btn": ".btn-primary", "search_bar": "#q"}})
+
+{f"### DEEP ANALYSIS MODE ENABLED ###\nBe extremely thorough. Analyze all possible interactive elements. If previous attempts failed, explain why and suggest a robust alternative." if deeper_analysis else ""}
 
 IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
 
@@ -228,14 +270,16 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                 contents.append(image)
             
             # Call generate_content with ThinkingConfig
+            thinking_level = "medium" if deeper_analysis else self.thinking_level
+            
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
                 model=self.model_name,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    temperature=0.1,
+                    temperature=0.1 if not deeper_analysis else 0.2,
                     max_output_tokens=2048,
-                    thinking_config=types.ThinkingConfig(thinking_level=self.thinking_level)
+                    thinking_config=types.ThinkingConfig(thinking_level=thinking_level)
                 )
             )
             
@@ -347,8 +391,75 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
             print(f"❌ Action execution error: {e}")
             return False
     
+    async def verify_objective(self, objective: str, snapshot: str, screenshot_b64: str = None) -> Dict:
+        """Verify if the test objective was achieved.
+        
+        Args:
+            objective: The original test objective
+            snapshot: Current page DOM snapshot
+            screenshot_b64: Optional screenshot for visual verification
+        
+        Returns:
+            Dict with: { passed: bool, verdict: str, confidence: float }
+        """
+        if not self.client:
+            return {"passed": False, "verdict": "AI client not available", "confidence": 0}
+        
+        prompt = f"""You are a QA Engineer performing a FINAL VERIFICATION.
+
+ORIGINAL TEST OBJECTIVE:
+{objective}
+
+CURRENT PAGE STATE:
+{snapshot[:4000]}
+
+Based on the current page state, determine if the test objective was successfully achieved.
+
+Respond with ONLY a JSON object:
+{{
+    "passed": true or false,
+    "verdict": "Brief explanation of the result (1-2 sentences)",
+    "confidence": 0.0 to 1.0
+}}"""
+
+        try:
+            contents = [prompt]
+            
+            # Add screenshot if available
+            if screenshot_b64 and self.use_screenshots:
+                try:
+                    img_data = base64.b64decode(screenshot_b64)
+                    img = Image.open(io.BytesIO(img_data))
+                    contents.append(img)
+                except:
+                    pass
+            
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=self.model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=512
+                )
+            )
+            
+            if not response or not response.text:
+                return {"passed": False, "verdict": "Could not verify", "confidence": 0}
+            
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1]
+                text = text.rsplit("```", 1)[0]
+            
+            return json.loads(text)
+        except Exception as e:
+            print(f"⚠️ Verification error: {e}")
+            return {"passed": False, "verdict": f"Verification failed: {e}", "confidence": 0}
+    
     async def run_test(self, test_id: str, url: str, objective: str, 
-                   username: str = None, password: str = None, callback=None) -> TestResult:
+                   username: str = None, password: str = None, 
+                   deeper_analysis: bool = False, callback=None) -> TestResult:
         """Run a test against a URL with a natural language objective.
         
         Args:
@@ -365,7 +476,8 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
             objective=objective,
             status="running",
             steps=[],
-            started_at=datetime.now().isoformat()
+            started_at=datetime.now().isoformat(),
+            thinking="Starting test agent..."
         )
         self.tests[test_id] = result
         
@@ -375,6 +487,7 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
             return result
         
         # Initialize browser
+        result.thinking = "Initializing browser..."
         if not await self._init_browser():
             result.status = "failed"
             result.final_verdict = "Could not initialize browser"
@@ -382,6 +495,7 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
         
         try:
             # Navigate to URL via MCP
+            result.thinking = f"Navigating to {url}..."
             await self.mcp.goto(url)
             await asyncio.sleep(1)
             
@@ -397,11 +511,17 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                 
                 # Ask Gemini what to do
                 print(f"   Calling Gemini...", flush=True)
+                result.thinking = f"Analyzing Step {step_num}..."
+                if callback: await callback(result)
+                
                 try:
                     gemini_response = await self._ask_gemini(
                         screenshot, objective, result.steps, 
-                        snapshot=snapshot, username=username, password=password
+                        snapshot=snapshot, username=username, password=password,
+                        deeper_analysis=deeper_analysis
                     )
+                    result.thinking = f"Executing: {gemini_response.get('description', 'Next action')}"
+                    if callback: await callback(result)
                     print(f"   Gemini response: action={gemini_response.get('action')}, target={gemini_response.get('target')}", flush=True)
                 except Exception as e:
                     step = TestStep(
@@ -424,22 +544,29 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                 
                 # Check if done
                 if action == "done":
-                    success = True
-                    if is_objective_met:
+                    # Run final verification
+                    print("🔍 Running final objective verification...", flush=True)
+                    snapshot = await self._get_page_snapshot()
+                    verification = await self.verify_objective(objective, snapshot, screenshot)
+                    
+                    if verification.get("passed", False):
                         result.status = "passed"
-                        result.final_verdict = "Test objective achieved"
+                        result.final_verdict = verification.get("verdict", "Test objective achieved")
                     else:
                         result.status = "failed"
-                        result.final_verdict = reasoning
+                        result.final_verdict = verification.get("verdict", reasoning)
+                    
+                    confidence = verification.get("confidence", 0)
+                    print(f"✅ Verification: {result.status} (confidence: {confidence:.0%})", flush=True)
                     
                     # Store final step
                     step = TestStep(
                         step_number=step_num,
                         action=action,
-                        reasoning=reasoning,
-                        description=description or "Test completed",
+                        reasoning=f"Verification: {verification.get('verdict', reasoning)}",
+                        description=description or f"Test completed - {result.status}",
                         page_state=page_state,
-                        success=success,
+                        success=verification.get("passed", False),
                         screenshot=screenshot
                     )
                     result.steps.append(step)
@@ -459,7 +586,9 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                     description=description,
                     page_state=page_state,
                     success=success,
-                    screenshot=screenshot
+                    screenshot=screenshot,
+                    alternative_selectors=gemini_response.get("alternative_selectors"),
+                    debug_info=gemini_response.get("debug_map")
                 )
                 result.steps.append(step)
                 
@@ -486,6 +615,7 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
         finally:
             await self._close_browser()
             result.completed_at = datetime.now().isoformat()
+            self._save_history()
         
         return result
     
@@ -496,6 +626,77 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
     def to_json(self, result: TestResult) -> Dict:
         """Convert TestResult to JSON-serializable dict."""
         return asdict(result)
+    
+    async def generate_test_from_diff(self, diff: str, instructions: str = "", file_list: List[str] = None) -> Dict:
+        """
+        Use Gemini to analyze a code diff and generate a test objective.
+        
+        Args:
+            diff: The git diff string
+            instructions: Original Jules instructions/prompt
+            file_list: List of affected files
+        
+        Returns:
+            Dict with: { url, objective, steps: List[str] }
+        """
+        if not self.client:
+            raise Exception("GenAI client not initialized")
+        
+        files_context = ""
+        if file_list:
+            files_context = f"\nAffected files:\n" + "\n".join(f"- {f}" for f in file_list[:10])
+        
+        prompt = f"""You are a QA Engineer. Analyze the following code changes and generate a TEST OBJECTIVE.
+
+ORIGINAL INSTRUCTIONS:
+{instructions or "Not provided"}
+{files_context}
+
+CODE DIFF:
+{diff[:8000]}  # Truncate very long diffs
+
+Based on these changes, provide a structured test plan as JSON:
+{{
+    "url": "The most likely URL to test (e.g., /login, /dashboard). If unsure, use '/'",
+    "objective": "A clear test objective in 1-2 sentences",
+    "steps": ["Step 1: ...", "Step 2: ...", "Step 3: ..."]
+}}
+
+Respond with ONLY the JSON object."""
+
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=self.model_name,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=1024
+                )
+            )
+            
+            if not response or not response.text:
+                return {
+                    "url": "/",
+                    "objective": "Verify the application works after the changes",
+                    "steps": ["Navigate to the affected area", "Verify functionality"]
+                }
+            
+            text = response.text.strip()
+            # Remove markdown code blocks if present
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1]
+                text = text.rsplit("```", 1)[0]
+            
+            import json
+            return json.loads(text)
+        except Exception as e:
+            print(f"⚠️ Test generation error: {e}")
+            return {
+                "url": "/",
+                "objective": f"Verify the application works after code changes: {instructions[:100]}",
+                "steps": ["Navigate to affected area", "Verify changes are working"]
+            }
 
 
 # Global instance

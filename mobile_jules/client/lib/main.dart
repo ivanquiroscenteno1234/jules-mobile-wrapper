@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
 import 'chat_screen.dart';
+import 'creds_screen.dart';
 import 'config.dart';
 
 // Global notification plugin instance
@@ -171,6 +172,11 @@ class _MyAppState extends State<MyApp> {
               sourceId: args['sourceId'],
               repoName: args['repoName'],
             ),
+          );
+        }
+        if (settings.name == '/creds') {
+          return MaterialPageRoute(
+            builder: (context) => const CredsScreen(),
           );
         }
         return null;

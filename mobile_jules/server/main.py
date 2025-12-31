@@ -19,14 +19,7 @@ from notifications import notification_service, SessionPoller
 from tester_agent import tester_agent
 from github_client import get_github_client
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from contextlib import asynccontextmanager
 
 # Configuration
 API_KEY = os.environ.get("JULES_API_KEY")
@@ -50,8 +43,6 @@ else:
 # Session poller for notifications
 session_poller = SessionPoller(client, notification_service)
 
-from contextlib import asynccontextmanager
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the session polling background task."""
@@ -60,10 +51,69 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
 completed_session_data: Dict[str, Dict] = {}
+
+# Credentials storage
+CREDENTIALS_FILE = "credentials.json"
+SECRET_KEY_FILE = "secret.key"
+
+def get_encryption_key():
+    if os.path.exists(SECRET_KEY_FILE):
+        with open(SECRET_KEY_FILE, "rb") as f:
+            return f.read()
+    else:
+        from cryptography.fernet import Fernet
+        key = Fernet.generate_key()
+        with open(SECRET_KEY_FILE, "wb") as f:
+            f.write(key)
+        return key
+
+try:
+    from cryptography.fernet import Fernet
+    cipher_suite = Fernet(get_encryption_key())
+except ImportError:
+    print("Warning: 'cryptography' not installed. Password encryption disabled.")
+    cipher_suite = None
+
+def encrypt_password(password: str) -> str:
+    if not password or not cipher_suite: return password
+    return cipher_suite.encrypt(password.encode()).decode()
+
+def decrypt_password(token: str) -> str:
+    if not token or not cipher_suite: return token
+    try:
+        return cipher_suite.decrypt(token.encode()).decode()
+    except:
+        # If decryption fails, it might be plain text from before encryption was added
+        return token
+
+def load_credentials() -> Dict[str, List[Dict]]:
+    """Load credentials from JSON file."""
+    if os.path.exists(CREDENTIALS_FILE):
+        try:
+            with open(CREDENTIALS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_credentials(data: Dict[str, List[Dict]]):
+    """Save credentials to JSON file."""
+    with open(CREDENTIALS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# In-memory cache
+credentials_data: Dict[str, List[Dict]] = load_credentials()
 
 # Device registration model
 class DeviceRegistration(BaseModel):
@@ -201,6 +251,217 @@ async def get_session_patch(session_id: str):
             status_code=404, 
             detail="Patch data not found. Session may not have completed or page was refreshed."
         )
+
+# Helper functions for diff extraction
+def extract_diff_from_activities(activities: List[Dict]) -> str:
+    """Parse activities to find code diffs."""
+    for activity in activities:
+        # Look for changeSet, fileChanges, or diff fields
+        if "changeSet" in activity:
+            change_set = activity["changeSet"]
+            if isinstance(change_set, dict):
+                return change_set.get("patch", "") or change_set.get("diff", "")
+        if "fileChanges" in activity:
+            changes = activity["fileChanges"]
+            if isinstance(changes, list):
+                return "\n".join([f"File: {c.get('path', 'unknown')}\n{c.get('diff', '')}" for c in changes])
+        # Check for code artifacts
+        if "codeArtifact" in activity:
+            artifact = activity["codeArtifact"]
+            if isinstance(artifact, dict) and "content" in artifact:
+                return artifact["content"]
+    return ""
+
+def get_jules_branch(session: Dict) -> Optional[str]:
+    """Extract the branch name Jules created."""
+    for output in session.get("outputs", []):
+        if "branch" in output:
+            branch_info = output["branch"]
+            if isinstance(branch_info, dict):
+                return branch_info.get("name")
+            return str(branch_info)
+        if "pullRequest" in output:
+            pr_info = output["pullRequest"]
+            if isinstance(pr_info, dict):
+                return pr_info.get("headBranch") or pr_info.get("head", {}).get("ref")
+    return None
+
+def get_repo_info(session: Dict) -> tuple:
+    """Extract owner/repo from session source context."""
+    source = session.get("sourceContext", {}).get("source", "")
+    # Format: sources/github/owner/repo
+    parts = source.split("/")
+    if len(parts) >= 4 and parts[1] == "github":
+        return parts[2], parts[3]
+    return None, None
+
+@app.post("/sessions/{session_id}/generate-test")
+async def generate_test_from_session(session_id: str):
+    """Generate test steps from a session's code changes.
+    
+    Priority order:
+    1. Extract diff from Jules activities
+    2. Fallback to GitHub compare API (if branch/PR exists)
+    3. Return error prompting PR creation
+    """
+    try:
+        # Get session details
+        session = await client.get_session(session_id)
+        
+        diff = ""
+        instructions = ""
+        file_list = []
+        
+        # Step 1: Try to get diff from activities
+        print(f"🔍 Fetching activities for {session_id}...", flush=True)
+        activities = await client.list_activities(session_id, get_all=True)
+        diff = extract_diff_from_activities(activities)
+        
+        if diff:
+            print(f"✅ Found diff in activities ({len(diff)} chars)", flush=True)
+        
+        # Step 2: If no diff from activities, try stored data
+        if not diff:
+            full_session_id = session_id if session_id.startswith("sessions/") else f"sessions/{session_id}"
+            if full_session_id in completed_session_data:
+                data = completed_session_data[full_session_id]
+                diff = data.get("patch", "")
+                if diff:
+                    print(f"✅ Found diff in stored data ({len(diff)} chars)", flush=True)
+        
+        # Step 3: If still no diff, try GitHub compare
+        if not diff:
+            branch = get_jules_branch(session)
+            owner, repo = get_repo_info(session)
+            if branch and owner and repo:
+                print(f"🔍 Trying GitHub compare: {owner}/{repo} main...{branch}", flush=True)
+                try:
+                    github_client = get_github_client()
+                    if github_client:
+                        diff = await github_client.get_branch_diff(owner, repo, "main", branch)
+                        if diff:
+                            print(f"✅ Found diff from GitHub ({len(diff)} chars)", flush=True)
+                except Exception as e:
+                    print(f"⚠️ GitHub compare failed: {e}", flush=True)
+        
+        # Get instructions from session for context
+        if "userRequest" in session:
+            instructions = session["userRequest"].get("text", "")
+        title = session.get("title", "")
+        context = instructions or title or "Verify the application works correctly"
+        
+        # Get file list from outputs if available
+        if "outputs" in session:
+            for output in session["outputs"]:
+                if "pullRequest" in output:
+                    pr_info = output.get("pullRequest", {})
+                    if "changedFiles" in pr_info:
+                        file_list = pr_info["changedFiles"]
+        
+        # Step 4: If still no diff, inform user
+        if not diff and not instructions:
+            raise HTTPException(
+                status_code=400,
+                detail="Create a PR or branch first to enable testing. No code changes found."
+            )
+        
+        # Generate test using AI
+        result = await tester_agent.generate_test_from_diff(
+            diff=diff,
+            instructions=context,
+            file_list=file_list
+        )
+        
+        return {
+            "success": True,
+            "test": result,
+            "session_id": session_id,
+            "diff_source": "activities" if diff else "context_only"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Test generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===== Credentials Management Endpoints =====
+
+class CredentialCreate(BaseModel):
+    name: str
+    username: str
+    password: str
+
+@app.get("/repos/{owner}/{repo}/credentials")
+async def list_credentials(owner: str, repo: str):
+    """List all saved credentials for a repository."""
+    repo_key = f"{owner}/{repo}"
+    creds = credentials_data.get(repo_key, [])
+    safe_creds = [
+        {
+            "id": c["id"],
+            "name": c["name"],
+            "username": c["username"],
+            "created_at": c.get("created_at", "")
+        }
+        for c in creds
+    ]
+    return {"credentials": safe_creds}
+
+@app.post("/repos/{owner}/{repo}/credentials")
+async def add_credential(owner: str, repo: str, cred: CredentialCreate):
+    """Add a new credential for a repository."""
+    from datetime import datetime
+    
+    repo_key = f"{owner}/{repo}"
+    if repo_key not in credentials_data:
+        credentials_data[repo_key] = []
+    
+    new_cred = {
+        "id": str(uuid.uuid4()),
+        "name": cred.name,
+        "username": cred.username,
+        "password": encrypt_password(cred.password),
+        "created_at": datetime.now().isoformat()
+    }
+    
+    credentials_data[repo_key].append(new_cred)
+    save_credentials(credentials_data)
+    
+    return {
+        "success": True,
+        "credential": {
+            "id": new_cred["id"],
+            "name": new_cred["name"],
+            "username": new_cred["username"]
+        }
+    }
+
+@app.delete("/credentials/{credential_id}")
+async def delete_credential(credential_id: str):
+    """Delete a credential by ID."""
+    for repo_key, creds in credentials_data.items():
+        for i, cred in enumerate(creds):
+            if cred["id"] == credential_id:
+                del credentials_data[repo_key][i]
+                save_credentials(credentials_data)
+                return {"success": True}
+    
+    raise HTTPException(status_code=404, detail="Credential not found")
+
+@app.get("/credentials/{credential_id}")
+async def get_credential(credential_id: str):
+    """Get a credential by ID (returns username and password for test execution)."""
+    for repo_key, creds in credentials_data.items():
+        for cred in creds:
+            if cred["id"] == credential_id:
+                return {
+                    "id": cred["id"],
+                    "name": cred["name"],
+                    "username": cred["username"],
+                    "password": decrypt_password(cred["password"])
+                }
+    
+    raise HTTPException(status_code=404, detail="Credential not found")
 
 @app.get("/repos/{owner}/{repo}/branches")
 async def list_repo_branches(owner: str, repo: str):
@@ -1030,6 +1291,7 @@ class TestRequest(BaseModel):
     objective: str
     username: Optional[str] = None
     password: Optional[str] = None
+    deeper_analysis: bool = False
 
 URL_HISTORY_FILE = "test_urls.json"
 
@@ -1064,7 +1326,8 @@ async def start_test(request: TestRequest):
             request.url, 
             request.objective,
             username=request.username,
-            password=request.password
+            password=request.password,
+            deeper_analysis=request.deeper_analysis
         )
     )
     # Register the task so it can be canceled
@@ -1077,7 +1340,8 @@ async def start_test(request: TestRequest):
         "test_id": test_id,
         "status": "started",
         "url": request.url,
-        "objective": request.objective
+        "objective": request.objective,
+        "thinking": "Initializing agent..."
     }
 
 @app.get("/test/status/{test_id}")
@@ -1096,6 +1360,70 @@ async def cancel_test(test_id: str):
         return {"status": "error", "message": "Test not found or not running"}
     return {"status": "canceled", "test_id": test_id}
 
+@app.post("/test/retry/{test_id}")
+async def retry_test(test_id: str):
+    """Retry a previous test."""
+    result = tester_agent.get_test(test_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Test not found")
+    
+    # Start MCP server if not running
+    start_mcp_server()
+    
+    new_test_id = str(uuid.uuid4())[:8]
+    
+    # Start the test as a background async task
+    task = asyncio.create_task(
+        tester_agent.run_test(
+            new_test_id, 
+            result.url, 
+            result.objective,
+            deeper_analysis=False
+        )
+    )
+    tester_agent.active_tasks[new_test_id] = task
+    
+    return {
+        "test_id": new_test_id,
+        "status": "started",
+        "url": result.url,
+        "objective": result.objective,
+        "is_retry": True,
+        "original_test_id": test_id,
+        "thinking": "Retrying test..."
+    }
+
+@app.post("/test/retry-deeper/{test_id}")
+async def retry_test_deeper(test_id: str):
+    """Retry a previous test with deeper analysis."""
+    result = tester_agent.get_test(test_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Test not found")
+    
+    start_mcp_server()
+    new_test_id = str(uuid.uuid4())[:8]
+    
+    task = asyncio.create_task(
+        tester_agent.run_test(
+            new_test_id, 
+            result.url, 
+            result.objective,
+            deeper_analysis=True
+        )
+    )
+    tester_agent.active_tasks[new_test_id] = task
+    
+    return {
+        "test_id": new_test_id,
+        "status": "started",
+        "url": result.url,
+        "objective": result.objective,
+        "is_retry": True,
+        "deeper_analysis": True,
+        "original_test_id": test_id,
+        "thinking": "Retrying with Deeper Analysis..."
+    }
+
 @app.get("/test/urls")
 async def get_test_urls():
     """Get list of previously used test URLs."""
@@ -1111,6 +1439,105 @@ async def get_test_urls():
 async def list_tests():
     """List all tests."""
     return [tester_agent.to_json(t) for t in tester_agent.tests.values()]
+
+# ===== Test Presets API =====
+
+PRESETS_FILE = os.path.join(os.path.dirname(__file__), "test_presets.json")
+
+class TestPreset(BaseModel):
+    id: Optional[str] = None
+    title: str
+    url: str
+    objective: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    repository_full_name: str
+
+def _load_presets() -> Dict:
+    """Load presets from JSON file."""
+    if os.path.exists(PRESETS_FILE):
+        try:
+            with open(PRESETS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {"presets": []}
+    return {"presets": []}
+
+def _save_presets(data: Dict):
+    """Save presets to JSON file."""
+    with open(PRESETS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+@app.get("/repos/{owner}/{repo}/presets")
+async def get_repo_presets(owner: str, repo: str):
+    """Get test presets for a specific repository."""
+    full_name = f"{owner}/{repo}"
+    data = _load_presets()
+    repo_presets = [p for p in data.get("presets", []) if p.get("repository_full_name") == full_name]
+    return {"presets": repo_presets}
+
+@app.post("/repos/{owner}/{repo}/presets")
+async def create_preset(owner: str, repo: str, preset: TestPreset):
+    """Create a new test preset for a repository."""
+    full_name = f"{owner}/{repo}"
+    data = _load_presets()
+    
+    new_preset = {
+        "id": str(uuid.uuid4())[:8],
+        "title": preset.title,
+        "url": preset.url,
+        "objective": preset.objective,
+        "username": preset.username,
+        "password": preset.password,
+        "repository_full_name": full_name
+    }
+    
+    data["presets"].append(new_preset)
+    _save_presets(data)
+    
+    return {"status": "created", "preset": new_preset}
+
+@app.delete("/presets/{preset_id}")
+async def delete_preset(preset_id: str):
+    """Delete a test preset by ID."""
+    data = _load_presets()
+    original_count = len(data.get("presets", []))
+    data["presets"] = [p for p in data.get("presets", []) if p.get("id") != preset_id]
+    
+    if len(data["presets"]) == original_count:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    
+    _save_presets(data)
+    return {"status": "deleted", "preset_id": preset_id}
+
+@app.get("/presets")
+async def list_all_presets():
+    """List all test presets."""
+    data = _load_presets()
+    return data
+
+@app.post("/test/{test_id}/save-as-preset")
+async def save_test_as_preset(test_id: str, title: str = Query(...), repo_full_name: str = Query(...)):
+    """Save a completed test as a new preset."""
+    result = tester_agent.get_test(test_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Test not found")
+    
+    data = _load_presets()
+    new_preset = {
+        "id": str(uuid.uuid4())[:8],
+        "title": title,
+        "url": result.url,
+        "objective": result.objective,
+        "username": None,  # Don't save credentials for security
+        "password": None,
+        "repository_full_name": repo_full_name
+    }
+    
+    data["presets"].append(new_preset)
+    _save_presets(data)
+    
+    return {"status": "created", "preset": new_preset}
 
 # ===== Speech to Text Endpoints =====
 

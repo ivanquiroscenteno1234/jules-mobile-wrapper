@@ -543,6 +543,78 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _testChanges(String sessionId) async {
+    try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+              SizedBox(width: 12),
+              Text('Generating test plan...'),
+            ],
+          ),
+          duration: Duration(seconds: 10),
+        ),
+      );
+      
+      final response = await http.post(
+        Uri.parse('${AppConfig.serverUrl}/sessions/$sessionId/generate-test'),
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+          'Content-Type': 'application/json',
+        },
+      );
+      
+      // Hide loading snackbar
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final test = data['test'] as Map<String, dynamic>?;
+        
+        if (test != null && mounted) {
+          // Navigate to TestScreen with pre-filled data
+          Navigator.pushNamed(
+            context,
+            '/test',
+            arguments: {
+              'url': test['url'] ?? '/',
+              'objective': test['objective'] ?? 'Verify changes work correctly',
+              'steps': test['steps'] ?? [],
+            },
+          );
+        }
+      } else {
+        // Parse error message from response
+        String errorMsg = 'Failed to generate test plan';
+        try {
+          final errorData = jsonDecode(response.body);
+          errorMsg = errorData['detail'] ?? errorMsg;
+        } catch (_) {}
+        
+        // Show user-friendly error
+        if (errorMsg.contains('PR') || errorMsg.contains('branch')) {
+          throw Exception('Create a PR or branch first to enable testing');
+        } else {
+          throw Exception(errorMsg);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$e'.replaceAll('Exception: ', '')),
+            backgroundColor: Colors.red[600],
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _toggleRecording() async {
     try {
       if (_isRecording) {
@@ -1624,15 +1696,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // Copy Patch button
+                // Test Changes button - generates AI test and navigates to Tester Agent
                 if (sessionId != null)
-                  OutlinedButton.icon(
-                    onPressed: () => _copyPatch(sessionId),
-                    icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('Copy Patch to Clipboard'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.grey[700],
-                      minimumSize: const Size(double.infinity, 40),
+                  ElevatedButton.icon(
+                    onPressed: () => _testChanges(sessionId),
+                    icon: const Icon(Icons.science_outlined, size: 18),
+                    label: const Text('Test Changes'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange[600],
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 45),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
