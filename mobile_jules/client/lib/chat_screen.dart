@@ -9,6 +9,8 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import 'config.dart';
 import 'main.dart' show showNotification;
 
@@ -146,6 +148,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   bool _isTranscribing = false;
+  
+  // Image picking
+  final ImagePicker _picker = ImagePicker();
+  File? _selectedImage;
 
   // UX Improvements
   String? _currentProgressTitle;
@@ -382,22 +388,73 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _sendMessage() {
-    if (_controller.text.isNotEmpty && _isConnected) {
-      _sendMessageText(_controller.text);
+    if ((_controller.text.isNotEmpty || _selectedImage != null) && _isConnected) {
+      if (_selectedImage != null) {
+        _uploadImageAndSend(_controller.text, _selectedImage!);
+      } else {
+        _sendMessageText(_controller.text);
+      }
       _controller.clear();
+      setState(() {
+        _selectedImage = null;
+      });
+    }
+  }
+
+  Future<void> _uploadImageAndSend(String text, File imageFile) async {
+    setState(() {
+      _isWaiting = true;
+    });
+
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('${AppConfig.serverUrl}/upload-image'));
+      request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+      final response = await request.send();
+
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        final filename = data['filename'];
+        
+        // Send JSON message to WebSocket
+        final payload = jsonEncode({
+          'text': text,
+          'image_filename': filename,
+        });
+        
+        setState(() {
+          _messages.add(ChatMessage.user(text.isEmpty ? "Image uploaded" : text));
+        });
+        
+        _channel.sink.add(payload);
+        _scrollToBottom();
+        
+      } else {
+        throw Exception('Image upload failed with status: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Error uploading image: $e');
+      setState(() {
+        _isWaiting = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send image: $e')),
+        );
+      }
     }
   }
   
   void _sendMessageText(String text) {
-    if (text.isNotEmpty && _isConnected) {
-      setState(() {
-        _messages.add(ChatMessage.user(text));
-        _isWaiting = true;
-      });
-      
-      _channel.sink.add(text);
-      _scrollToBottom();
-    }
+    if (text.isEmpty || !_isConnected) return;
+    
+    setState(() {
+      _messages.add(ChatMessage.user(text));
+      _isWaiting = true;
+    });
+    
+    _channel.sink.add(text);
+    _scrollToBottom();
   }
 
   void _approvePlan() {
@@ -684,6 +741,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final pickedFile = await _picker.pickImage(source: source);
+      if (pickedFile != null) {
+        setState(() {
+          _selectedImage = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('Image picking error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
+  }
+
   void _showCreateRepoDialog() {
     final TextEditingController nameController = TextEditingController();
     final TextEditingController descController = TextEditingController();
@@ -948,45 +1023,107 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Row(
+            child: Column(
               children: [
-                IconButton(
-                  icon: _isRecording 
-                      ? const Icon(Icons.stop, color: Colors.red) 
-                      : _isTranscribing 
-                          ? const SizedBox(
-                              width: 20, 
-                              height: 20, 
-                              child: CircularProgressIndicator(strokeWidth: 2)
-                            )
-                          : const Icon(Icons.mic, color: Colors.deepPurple),
-                  onPressed: _isTranscribing ? null : _toggleRecording,
-                  tooltip: _isRecording ? 'Stop recording' : 'Voice input',
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 5,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    decoration: const InputDecoration(
-                      hintText: 'Ask Jules something...',
-                      border: OutlineInputBorder(),
+                if (_selectedImage != null) _buildImagePreview(),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, color: Colors.deepPurple),
+                      onPressed: _showAttachmentMenu,
+                      tooltip: 'Add content',
                     ),
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  color: Colors.deepPurple,
-                  onPressed: _isWaiting ? null : _sendMessage,
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        minLines: 1,
+                        maxLines: 5,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          hintText: 'Ask Jules something...',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      color: Colors.deepPurple,
+                      onPressed: (_isWaiting || (_controller.text.isEmpty && _selectedImage == null))
+                          ? null
+                          : _sendMessage,
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Stack(
+        alignment: Alignment.topRight,
+        children: [
+          Image.file(
+            _selectedImage!,
+            height: 100,
+            fit: BoxFit.cover,
+          ),
+          IconButton(
+            icon: const Icon(Icons.cancel, color: Colors.white),
+            onPressed: () {
+              setState(() => _selectedImage = null);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAttachmentMenu() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: <Widget>[
+            ListTile(
+              leading: Icon(_isRecording ? Icons.stop : Icons.mic),
+              title: Text(_isRecording ? 'Stop Recording' : 'Voice Input'),
+              onTap: () {
+                Navigator.pop(context);
+                _toggleRecording();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Pick Image from Gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Take a Picture'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
