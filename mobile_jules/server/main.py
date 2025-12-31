@@ -19,6 +19,9 @@ from notifications import notification_service, SessionPoller
 from tester_agent import tester_agent
 from github_client import get_github_client
 
+import shutil
+from fastapi.staticfiles import StaticFiles
+import base64
 from contextlib import asynccontextmanager
 
 # Configuration
@@ -58,6 +61,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Create uploads directory if it doesn't exist
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Accepts an image file and saves it to the server."""
+    try:
+        # Sanitize filename
+        safe_filename = f"{uuid.uuid4()}_{file.filename.replace('..', '')}"
+        path = os.path.join(UPLOAD_DIR, safe_filename)
+        
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {"filename": safe_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not upload file: {e}")
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
@@ -788,6 +813,36 @@ async def _handle_websocket(
             # Wait for user message from phone
             data = await websocket.receive_text()
             
+            prompt_text = data
+            image_filename = None
+            visual_contexts = None
+            
+            try:
+                # Try to parse as JSON for new clients
+                json_data = json.loads(data)
+                prompt_text = json_data.get("text", "")
+                image_filename = json_data.get("image_filename")
+                
+                if image_filename:
+                    # Construct image path and read/encode it
+                    image_path = os.path.join(UPLOAD_DIR, image_filename)
+                    if os.path.exists(image_path):
+                        with open(image_path, "rb") as f:
+                            encoded_image = base64.b64encode(f.read()).decode('utf-8')
+                        
+                        visual_contexts = [{
+                            "image": {
+                                "imageData": {"base64": encoded_image}
+                            }
+                        }]
+                        print(f"DEBUG: Prepared visual context for {image_filename}")
+                    else:
+                        print(f"WARNING: Image file not found: {image_filename}")
+                        
+            except json.JSONDecodeError:
+                # It's a plain text message from an older client
+                pass
+
             # If no session yet, create one with this message as the task
             if not active_session_id:
                 try:
@@ -798,11 +853,12 @@ async def _handle_websocket(
                     
                     # Create session with user's message as the actual task
                     session_data = await client.create_session(
-                        source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
-                        auto_mode=auto_mode
+                        source_id=source_id,
+                        prompt=prompt_text,
+                        auto_mode=auto_mode,
+                        visual_contexts=visual_contexts,
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    print(f"DEBUG: Created session with task: {prompt_text[:50]}...")
                     
                     # Extract session_id from response
                     active_session_id = session_data.get("name")
@@ -834,12 +890,16 @@ async def _handle_websocket(
                     
             else:
                 # Session already exists, handle commands or send messages
-                if data.startswith("/approve"):
+                if prompt_text.startswith("/approve"):
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
                     # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    await client.send_message(
+                        active_session_id,
+                        prompt_text,
+                        visual_contexts=visual_contexts,
+                    )
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")

@@ -36,12 +36,13 @@ class JulesClient:
             return data.get("sessions", [])
 
     async def create_session(
-        self, 
+        self,
         source_id: str = None,  # Now optional for repoless sessions
         prompt: str = "Start session",
         auto_mode: bool = False,
         starting_branch: str = None,
-        title: str = None
+        title: str = None,
+        visual_contexts: Optional[List[Dict]] = None,
     ) -> Dict:
         """Creates a new chat session.
         
@@ -51,6 +52,7 @@ class JulesClient:
             auto_mode: If True, auto-approve plans and auto-create PRs (only for repo sessions)
             starting_branch: Optional branch to start from (only for repo sessions)
             title: Optional title for the session
+            visual_contexts: Optional list of visual contexts (e.g., base64 images)
         """
         payload = {
             "prompt": prompt,
@@ -59,6 +61,9 @@ class JulesClient:
         
         if title:
             payload["title"] = title
+            
+        if visual_contexts:
+            payload["visualContexts"] = visual_contexts
         
         if source_id:
             # Repo-based session - ALWAYS include githubRepoContext with startingBranch
@@ -85,7 +90,7 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def send_message(self, session_id: str, message: str):
+    async def send_message(self, session_id: str, message: str, visual_contexts: Optional[List[Dict]] = None):
         """Sends a user message to an existing session."""
         # Note: session_id usually comes in full form "sessions/123..."
         # If the API expects just the ID, we might need to parse it, 
@@ -93,6 +98,10 @@ class JulesClient:
         url = f"{self.base_url}/{session_id}:sendMessage"
         
         payload = {"prompt": message}
+        
+        if visual_contexts:
+            payload["visualContexts"] = visual_contexts
+            
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
