@@ -240,6 +240,19 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
             )
             
             # Extract text response
+            if not response or not response.text:
+                print(f"   ⚠️ Gemini returned empty response or was filtered. Response: {response}", flush=True)
+                return {
+                    "description": "Wait for page to settle",
+                    "reasoning": "Gemini response was empty or filtered, possibly due to safety settings.",
+                    "page_state": "OTHER",
+                    "action": "wait",
+                    "target": None,
+                    "value": "2000",
+                    "confidence": 0.5,
+                    "is_objective_met": False
+                }
+                
             text = response.text.strip()
             print(f"   Gemini raw response (first 200 chars): {text[:200]}", flush=True)
             
@@ -301,7 +314,20 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
                 return True
                 
             elif action == "wait":
-                wait_ms = int(value) if value and value.isdigit() else 2000
+                if target:
+                    # If target is provided, wait for it to appear
+                    print(f"   ⏳ Waiting for element: {target}")
+                    try:
+                        # Call the tool directly on MCP adapter
+                        await self.mcp.call_tool("playwright_wait_for_selector", {"selector": target, "timeout": 5000})
+                    except Exception:
+                        pass # Continue even if timeout
+                
+                # Handle both string and int values
+                if isinstance(value, int):
+                    wait_ms = value
+                else:
+                    wait_ms = int(value) if value and str(value).isdigit() else 2000
                 await asyncio.sleep(wait_ms / 1000)
                 return True
                 

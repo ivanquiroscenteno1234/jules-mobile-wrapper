@@ -50,11 +50,16 @@ else:
 # Session poller for notifications
 session_poller = SessionPoller(client, notification_service)
 
-@app.on_event("startup")
-async def startup_event():
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Start the session polling background task."""
     asyncio.create_task(session_poller.start_polling(interval_seconds=30))
     print("Session Poller started.")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
