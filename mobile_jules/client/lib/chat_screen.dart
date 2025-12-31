@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 import 'main.dart' show showNotification;
@@ -146,6 +148,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   bool _isTranscribing = false;
+
+  // Image upload
+  final ImagePicker _picker = ImagePicker();
+  XFile? _selectedImage;
+  String? _uploadedImageFilename;
+  bool _isUploading = false;
 
   // UX Improvements
   String? _currentProgressTitle;
@@ -369,6 +377,100 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  // --- Image Handling ---
+
+  void _showAttachmentOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: <Widget>[
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Pick from Gallery'),
+              onTap: () {
+                Navigator.of(context).pop();
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Take a Photo'),
+              onTap: () {
+                Navigator.of(context).pop();
+                _pickImage(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? image = await _picker.pickImage(source: source);
+      if (image != null) {
+        setState(() {
+          _selectedImage = image;
+          _uploadedImageFilename = null; // Reset previous upload
+        });
+        // Start uploading immediately after picking
+        _uploadImage(image);
+      }
+    } catch (e) {
+      print('Error picking image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _uploadImage(XFile image) async {
+    setState(() => _isUploading = true);
+    try {
+      final request = http.MultipartRequest(
+        'POST', 
+        Uri.parse('${AppConfig.serverUrl}/upload-image')
+      );
+      request.headers['ngrok-skip-browser-warning'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('file', image.path));
+
+      final response = await request.send();
+      
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        setState(() {
+          _uploadedImageFilename = data['filename'];
+        });
+      } else {
+        final respStr = await response.stream.bytesToString();
+        final error = jsonDecode(respStr)['detail'] ?? 'Image upload failed';
+        throw Exception(error);
+      }
+    } catch (e) {
+      debugPrint('Image upload error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e'.replaceAll('Exception: ', ''))),
+        );
+      }
+      _removeImage(); // Clear failed upload
+    } finally {
+      setState(() => _isUploading = false);
+    }
+  }
+
+  void _removeImage() {
+    setState(() {
+      _selectedImage = null;
+      _uploadedImageFilename = null;
+    });
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -381,11 +483,50 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _sendMessage() {
-    if (_controller.text.isNotEmpty && _isConnected) {
-      _sendMessageText(_controller.text);
-      _controller.clear();
+  void _sendMessage() async {
+    // Prevent sending empty messages unless an image is attached
+    if ((_controller.text.isEmpty && _selectedImage == null) || !_isConnected) {
+      return;
     }
+
+    // Don't send if an image is still uploading
+    if (_isUploading) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please wait for image to upload.')),
+        );
+      }
+      return;
+    }
+
+    final text = _controller.text;
+    String payload;
+
+    // If an image was picked and successfully uploaded, send JSON
+    if (_uploadedImageFilename != null) {
+      payload = jsonEncode({
+        'prompt': text,
+        'image_filename': _uploadedImageFilename,
+      });
+    } else {
+      // Otherwise, send plain text
+      payload = text;
+    }
+
+    setState(() {
+      _messages.add(ChatMessage.user(text));
+      _isWaiting = true;
+    });
+
+    _channel.sink.add(payload);
+    _scrollToBottom();
+
+    // Clear controller and reset image state
+    _controller.clear();
+    setState(() {
+      _selectedImage = null;
+      _uploadedImageFilename = null;
+    });
   }
   
   void _sendMessageText(String text) {
@@ -946,17 +1087,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+
+          // --- Image Preview ---
+          if (_selectedImage != null) _buildImagePreview(),
+
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
                 IconButton(
-                  icon: _isRecording 
-                      ? const Icon(Icons.stop, color: Colors.red) 
-                      : _isTranscribing 
+                  icon: const Icon(Icons.attach_file),
+                  color: Colors.deepPurple,
+                  onPressed: _isUploading ? null : _showAttachmentOptions,
+                  tooltip: 'Attach Image',
+                ),
+                IconButton(
+                  icon: _isRecording
+                      ? const Icon(Icons.stop, color: Colors.red)
+                      : _isTranscribing
                           ? const SizedBox(
-                              width: 20, 
-                              height: 20, 
+                              width: 20,
+                              height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2)
                             )
                           : const Icon(Icons.mic, color: Colors.deepPurple),
@@ -981,11 +1132,58 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 IconButton(
                   icon: const Icon(Icons.send),
                   color: Colors.deepPurple,
-                  onPressed: _isWaiting ? null : _sendMessage,
+                  onPressed: (_isWaiting || _isUploading) ? null : _sendMessage,
                 ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            height: 100,
+            width: 100,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              image: DecorationImage(
+                image: FileImage(File(_selectedImage!.path)),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          // Uploading overlay
+          if (_isUploading)
+            Container(
+              height: 100,
+              width: 100,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Center(child: CircularProgressIndicator(color: Colors.white)),
+            ),
+          // Remove button (only show if not uploading)
+          if (!_isUploading)
+            Positioned(
+              top: -12,
+              right: -12,
+              child: IconButton(
+                icon: const CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Colors.black54,
+                  child: Icon(Icons.close, color: Colors.white, size: 16),
+                ),
+                onPressed: _removeImage,
+              ),
+            ),
         ],
       ),
     );

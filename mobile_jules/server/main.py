@@ -5,6 +5,8 @@ import os
 import json
 import asyncio
 import uuid
+import shutil
+import base64
 from typing import List, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 import google.generativeai as genai
@@ -786,47 +788,71 @@ async def _handle_websocket(
     try:
         while True:
             # Wait for user message from phone
-            data = await websocket.receive_text()
+            raw_data = await websocket.receive_text()
             
-            # If no session yet, create one with this message as the task
+            # --- Message Parsing ---
+            prompt = ""
+            image_filename = None
+            image_data_b64 = None
+            
+            try:
+                # Try to parse as JSON (new format for image support)
+                msg_json = json.loads(raw_data)
+                prompt = msg_json.get("prompt", "")
+                image_filename = msg_json.get("image_filename")
+            except json.JSONDecodeError:
+                # Fallback for plain text messages
+                prompt = raw_data
+            
+            # --- Image Processing ---
+            if image_filename:
+                image_path = os.path.join(UPLOAD_DIR, image_filename)
+                if os.path.exists(image_path):
+                    try:
+                        with open(image_path, "rb") as f:
+                            image_data_b64 = base64.b64encode(f.read()).decode('utf-8')
+                        # Clean up the temp file
+                        os.remove(image_path)
+                    except Exception as e:
+                        print(f"Error processing image file: {e}")
+                        await websocket.send_json({"type": "error", "content": f"Failed to process image: {e}"})
+                        continue
+                else:
+                    print(f"Warning: Image file not found: {image_filename}")
+
+            # --- Session/Message Handling ---
             if not active_session_id:
+                # Create a new session with the first message (and optional image)
                 try:
                     await websocket.send_json({
                         "type": "status",
                         "content": "Creating session and sending task to Jules..."
                     })
                     
-                    # Create session with user's message as the actual task
                     session_data = await client.create_session(
                         source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
-                        auto_mode=auto_mode
+                        prompt=prompt,
+                        auto_mode=auto_mode,
+                        image_data=image_data_b64
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    print(f"DEBUG: Created session with task: {prompt[:50]}...")
                     
-                    # Extract session_id from response
-                    active_session_id = session_data.get("name")
-                    if not active_session_id:
-                        raw_id = session_data.get("id", "")
-                        active_session_id = f"sessions/{raw_id}" if raw_id else None
+                    active_session_id = session_data.get("name") or f"sessions/{session_data.get('id')}"
                     
                     if not active_session_id:
                         await websocket.send_json({"type": "error", "content": "Could not create session"})
                         continue
-                    
-                    # Track new session for notifications
+                        
                     if user_id:
                         session_poller.track_session(user_id, active_session_id)
                         print(f"Tracking new session {active_session_id} for user {user_id}")
                     
-                    # Send confirmation
                     await websocket.send_json({
                         "type": "system",
                         "content": "Session created! Jules is working on your task.",
                         "sessionId": active_session_id
                     })
                     
-                    # Start polling for this session
                     poller_task = asyncio.create_task(poll_jules())
                     
                 except Exception as e:
@@ -834,13 +860,16 @@ async def _handle_websocket(
                     
             else:
                 # Session already exists, handle commands or send messages
-                if data.startswith("/approve"):
+                if prompt.startswith("/approve"):
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
-                    # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
-            # The poller will pick up the response
+                    await client.send_message(
+                        active_session_id, 
+                        prompt, 
+                        image_data=image_data_b64
+                    )
+            # The poller will pick up the response from Jules
     except WebSocketDisconnect:
         print(f"Client disconnected")
     finally:
@@ -1538,6 +1567,27 @@ async def save_test_as_preset(test_id: str, title: str = Query(...), repo_full_n
     _save_presets(data)
     
     return {"status": "created", "preset": new_preset}
+
+# ===== Image Upload Endpoint =====
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Accepts an image upload and saves it to the uploads directory."""
+    try:
+        # Create a safe filename to avoid collisions
+        safe_filename = f"{uuid.uuid4()}_{file.filename}"
+        path = os.path.join(UPLOAD_DIR, safe_filename)
+        
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {"filename": safe_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {e}")
+
 
 # ===== Speech to Text Endpoints =====
 

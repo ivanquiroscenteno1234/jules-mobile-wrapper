@@ -36,12 +36,13 @@ class JulesClient:
             return data.get("sessions", [])
 
     async def create_session(
-        self, 
+        self,
         source_id: str = None,  # Now optional for repoless sessions
         prompt: str = "Start session",
         auto_mode: bool = False,
         starting_branch: str = None,
-        title: str = None
+        title: str = None,
+        image_data: Optional[str] = None  # Base64 encoded image
     ) -> Dict:
         """Creates a new chat session.
         
@@ -51,11 +52,20 @@ class JulesClient:
             auto_mode: If True, auto-approve plans and auto-create PRs (only for repo sessions)
             starting_branch: Optional branch to start from (only for repo sessions)
             title: Optional title for the session
+            image_data: Optional base64-encoded image data
         """
         payload = {
             "prompt": prompt,
             "requirePlanApproval": True
         }
+        
+        # Add visual context if image data is provided
+        if image_data:
+            payload["visualContexts"] = [{
+                "image": {
+                    "data": image_data
+                }
+            }]
         
         if title:
             payload["title"] = title
@@ -85,7 +95,7 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def send_message(self, session_id: str, message: str):
+    async def send_message(self, session_id: str, message: str, image_data: Optional[str] = None):
         """Sends a user message to an existing session."""
         # Note: session_id usually comes in full form "sessions/123..."
         # If the API expects just the ID, we might need to parse it, 
@@ -93,6 +103,14 @@ class JulesClient:
         url = f"{self.base_url}/{session_id}:sendMessage"
         
         payload = {"prompt": message}
+        
+        # Add visual context if image data is provided
+        if image_data:
+            payload["visualContexts"] = [{
+                "image": {
+                    "data": image_data
+                }
+            }]
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
