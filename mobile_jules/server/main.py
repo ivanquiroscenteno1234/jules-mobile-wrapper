@@ -41,11 +41,17 @@ else:
     sys.exit(1)
 
 # Session poller for notifications
+from config import UPLOAD_DIR
 session_poller = SessionPoller(client, notification_service)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the session polling background task."""
+    """Start background tasks and create directories."""
+    # Ensure the upload directory exists
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    print(f"Upload directory '{UPLOAD_DIR}' is ready.")
+    
+    # Start the session polling background task
     asyncio.create_task(session_poller.start_polling(interval_seconds=30))
     print("Session Poller started.")
     yield
@@ -636,6 +642,28 @@ async def create_github_pr(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ===== Image Upload Endpoint =====
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Accepts an image file and saves it locally."""
+    try:
+        # Generate a unique filename to avoid overwrites
+        extension = file.filename.split(".")[-1]
+        unique_filename = f"{uuid.uuid4()}.{extension}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        # Save the file
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        print(f"Image saved: {file_path}")
+        
+        return {"filename": unique_filename}
+    except Exception as e:
+        print(f"Error uploading image: {e}")
+        raise HTTPException(status_code=500, detail="Image upload failed")
+
 
 # Repoless WebSocket endpoint - no source_id required
 @app.websocket("/chat")
@@ -785,9 +813,24 @@ async def _handle_websocket(
 
     try:
         while True:
-            # Wait for user message from phone
-            data = await websocket.receive_text()
+            # Wait for user message from phone (can be JSON or plain text)
+            raw_data = await websocket.receive_text()
             
+            # Parse message
+            text = ""
+            image_filename = None
+            try:
+                # Assume JSON for new clients
+                data_obj = json.loads(raw_data)
+                text = data_obj.get("text", "")
+                image_filename = data_obj.get("image_filename")
+            except json.JSONDecodeError:
+                # Fallback for old clients sending plain text
+                text = raw_data
+
+            if not text and not image_filename:
+                continue
+
             # If no session yet, create one with this message as the task
             if not active_session_id:
                 try:
@@ -799,10 +842,11 @@ async def _handle_websocket(
                     # Create session with user's message as the actual task
                     session_data = await client.create_session(
                         source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
+                        prompt=text,
+                        image_filename=image_filename,
                         auto_mode=auto_mode
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    print(f"DEBUG: Created session with task: {text[:50]}...")
                     
                     # Extract session_id from response
                     active_session_id = session_data.get("name")
@@ -834,12 +878,16 @@ async def _handle_websocket(
                     
             else:
                 # Session already exists, handle commands or send messages
-                if data.startswith("/approve"):
+                if text.startswith("/approve"):
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
                     # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    await client.send_message(
+                        active_session_id, 
+                        text,
+                        image_filename=image_filename
+                    )
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")
