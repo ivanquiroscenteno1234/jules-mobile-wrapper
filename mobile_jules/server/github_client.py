@@ -152,6 +152,35 @@ class GitHubClient:
             print(f"GitHub compare error: {e}")
             return ""
     
+    async def get_pr_diff(self, owner: str, repo: str, pull_number: int) -> str:
+        """
+        Get diff from a pull request using GitHub API.
+        
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            pull_number: PR number
+            
+        Returns:
+            The diff as a string, or empty string if request fails
+        """
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Request diff format
+                headers = {**self.headers, "Accept": "application/vnd.github.v3.diff"}
+                response = await client.get(
+                    f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}",
+                    headers=headers
+                )
+                if response.status_code == 200:
+                    return response.text
+                else:
+                    print(f"GitHub PR diff returned {response.status_code}")
+                    return ""
+        except Exception as e:
+            print(f"GitHub PR diff error: {e}")
+            return ""
+    
     async def create_pr_from_patch(
         self,
         owner: str,

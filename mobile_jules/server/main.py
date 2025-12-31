@@ -63,6 +63,10 @@ app.add_middleware(
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
 completed_session_data: Dict[str, Dict] = {}
 
+# Track seen files per session - persists across reconnections
+# Key: session_id, Value: set of file paths already reported
+session_seen_files: Dict[str, set] = {}
+
 # Credentials storage
 CREDENTIALS_FILE = "credentials.json"
 SECRET_KEY_FILE = "secret.key"
@@ -296,15 +300,20 @@ def get_repo_info(session: Dict) -> tuple:
     return None, None
 
 @app.post("/sessions/{session_id}/generate-test")
-async def generate_test_from_session(session_id: str):
+async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Query(None)):
     """Generate test steps from a session's code changes.
     
     Priority order:
-    1. Extract diff from Jules activities
-    2. Fallback to GitHub compare API (if branch/PR exists)
-    3. Return error prompting PR creation
+    1. Use pr_url directly if provided
+    2. Extract diff from Jules activities
+    3. Fallback to GitHub compare API (if branch/PR exists)
+    4. Return error prompting PR creation
     """
     try:
+        # Ensure session_id has proper prefix
+        if not session_id.startswith("sessions/"):
+            session_id = f"sessions/{session_id}"
+        
         # Get session details
         session = await client.get_session(session_id)
         
@@ -312,10 +321,27 @@ async def generate_test_from_session(session_id: str):
         instructions = ""
         file_list = []
         
+        # Step 0: Use pr_url directly if provided by client
+        if pr_url:
+            print(f"🔍 Using provided PR URL: {pr_url}", flush=True)
+            try:
+                import re
+                match = re.match(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
+                if match:
+                    pr_owner, pr_repo, pr_number = match.groups()
+                    github_client = get_github_client()
+                    if github_client:
+                        diff = await github_client.get_pr_diff(pr_owner, pr_repo, int(pr_number))
+                        if diff:
+                            print(f"✅ Found diff from provided PR #{pr_number} ({len(diff)} chars)", flush=True)
+            except Exception as e:
+                print(f"⚠️ Failed to fetch diff from provided PR: {e}", flush=True)
+        
         # Step 1: Try to get diff from activities
-        print(f"🔍 Fetching activities for {session_id}...", flush=True)
-        activities = await client.list_activities(session_id, get_all=True)
-        diff = extract_diff_from_activities(activities)
+        if not diff:
+            print(f"🔍 Fetching activities for {session_id}...", flush=True)
+            activities = await client.list_activities(session_id, get_all=True)
+            diff = extract_diff_from_activities(activities)
         
         if diff:
             print(f"✅ Found diff in activities ({len(diff)} chars)", flush=True)
@@ -344,6 +370,30 @@ async def generate_test_from_session(session_id: str):
                 except Exception as e:
                     print(f"⚠️ GitHub compare failed: {e}", flush=True)
         
+        # Step 4: Try to get diff from PR if URL is available in session outputs
+        if not diff:
+            pr_url = None
+            for output in session.get("outputs", []):
+                if "pullRequest" in output:
+                    pr_url = output["pullRequest"].get("url")
+                    break
+            
+            if pr_url:
+                print(f"🔍 Trying to fetch diff from PR: {pr_url}", flush=True)
+                try:
+                    # Parse PR URL: https://github.com/{owner}/{repo}/pull/{number}
+                    import re
+                    match = re.match(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
+                    if match:
+                        pr_owner, pr_repo, pr_number = match.groups()
+                        github_client = get_github_client()
+                        if github_client:
+                            diff = await github_client.get_pr_diff(pr_owner, pr_repo, int(pr_number))
+                            if diff:
+                                print(f"✅ Found diff from PR #{pr_number} ({len(diff)} chars)", flush=True)
+                except Exception as e:
+                    print(f"⚠️ PR diff fetch failed: {e}", flush=True)
+        
         # Get instructions from session for context
         if "userRequest" in session:
             instructions = session["userRequest"].get("text", "")
@@ -358,11 +408,11 @@ async def generate_test_from_session(session_id: str):
                     if "changedFiles" in pr_info:
                         file_list = pr_info["changedFiles"]
         
-        # Step 4: If still no diff, inform user
+        # Step 5: If still no diff, inform user
         if not diff and not instructions:
             raise HTTPException(
                 status_code=400,
-                detail="Create a PR or branch first to enable testing. No code changes found."
+                detail="Create a PR or branch first to enable testing."
             )
         
         # Generate test using AI
@@ -685,6 +735,14 @@ async def _handle_websocket(
     poller_task = None
     active_session_id = session_id  # Will be set when session is created/reconnected
     
+    # Get or create seen files set for this session (persists across reconnections)
+    def get_session_seen_files():
+        if active_session_id:
+            if active_session_id not in session_seen_files:
+                session_seen_files[active_session_id] = set()
+            return session_seen_files[active_session_id]
+        return set()
+    
     async def poll_jules():
         """Background task to poll for new messages/activities from Jules."""
         cached_session_data = None
@@ -703,8 +761,8 @@ async def _handle_websocket(
                             except Exception as e:
                                 print(f"Error fetching session data: {e}")
                         
-                        # Parse activity to structured JSON, passing session data
-                        parsed = parse_activity(activity, session_data=cached_session_data)
+                        # Parse activity to structured JSON, passing session data and seen files
+                        parsed = parse_activity(activity, session_data=cached_session_data, seen_files=get_session_seen_files())
                         if parsed:
                             await websocket.send_json(parsed)
                 
@@ -847,12 +905,13 @@ async def _handle_websocket(
         if 'poller_task' in dir() and poller_task:
             poller_task.cancel()
 
-def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
+def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = None) -> Dict:
     """Converts a Jules Activity JSON into a structured dict for the Flutter app.
     
     Args:
         activity: The activity dict from Jules API
         session_data: Optional session dict containing outputs[] with PR info
+        seen_files: Optional set to track files already reported (for deduplication)
     """
     # Debug: Log all activity keys to understand structure
     act_keys = [k for k in activity.keys() if k not in {"name", "id", "createTime", "originator"}]
@@ -1015,22 +1074,60 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
         print(f"DEBUG sessionCompleted response: hasPatch={has_patch}, sessionId={session_id}, pr_url={pr_url}")
         return response
     
-    # Session Progress (status updates)
+    # Session Progress (status updates) - may contain Jules' text messages
     if "sessionProgress" in activity:
         progress = activity["sessionProgress"]
+        print(f"DEBUG sessionProgress FOUND: keys = {list(progress.keys())}", flush=True)
+        print(f"DEBUG sessionProgress value: {str(progress)[:500]}", flush=True)
         result["type"] = "status"
         result["content"] = progress.get("status") or progress.get("message", "Working...")
         return result
     
+    # Check for progressUpdated - another format for status/thinking updates
+    if "progressUpdated" in activity:
+        progress = activity["progressUpdated"]
+        print(f"DEBUG progressUpdated FOUND: keys = {list(progress.keys()) if isinstance(progress, dict) else type(progress)}", flush=True)
+        print(f"DEBUG progressUpdated value: {str(progress)[:500]}", flush=True)
+        # Check if there's a title or description - title is what Jules web shows as the main message
+        if isinstance(progress, dict):
+            title = progress.get("title", "")
+            description = progress.get("description", "")
+            
+            # Determine if this is just a status update or a real message
+            # Status updates: short progress titles without artifacts
+            # Real messages: have description or will have artifacts
+            has_artifacts = "artifacts" in activity and len(activity["artifacts"]) > 0
+            
+            if title and (has_artifacts or description):
+                # This is a real message - use description as content (it's complete)
+                # Jules API often truncates title with "..." but description has full text
+                result["type"] = "message"
+                result["originator"] = "agent"
+                result["content"] = description if description else title
+                if title and description:
+                    result["title"] = title  # Keep title as optional short summary
+                print(f"DEBUG progressUpdated: message = '{(description or title)[:100]}'", flush=True)
+            elif title:
+                # Just a status update (no artifacts, no description) - update working indicator
+                result["type"] = "progress"
+                result["content"] = title
+                print(f"DEBUG progressUpdated: status update = '{title[:100]}'", flush=True)
+                # Note: progress type won't create a chat bubble, just updates indicator
+    
     # Agent Messaged (Jules' text/chat responses)
     if "agentMessaged" in activity:
         agent_msg = activity["agentMessaged"]
+        print(f"DEBUG agentMessaged FOUND: keys = {list(agent_msg.keys())}", flush=True)
+        print(f"DEBUG agentMessaged value: {str(agent_msg)[:500]}", flush=True)
         message = agent_msg.get("message") or agent_msg.get("text") or agent_msg.get("content", "")
         if message:
             result["type"] = "message"
             result["originator"] = "agent"
             result["content"] = message
+            print(f"DEBUG agentMessaged: returning message = '{message[:100]}...'", flush=True)
             return result
+        else:
+            print(f"DEBUG agentMessaged: message was empty", flush=True)
     
     
     # Tool Called (commands executed)
@@ -1082,6 +1179,10 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
         result["artifacts"] = []
         content_parts = []
         
+        # If we already have a message from progressUpdated, start with it
+        if result.get("content") and result.get("type") == "message":
+            content_parts.append(result["content"])
+        
         # Debug: Log what artifacts we're getting
         for i, art in enumerate(activity["artifacts"]):
             art_keys = list(art.keys())
@@ -1116,16 +1217,26 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
                         if path and path != "/dev/null" and path not in file_paths:
                             file_paths.append(path)
                 
-                # Use extracted file paths or fall back to commit message
+                # Show "Updated {filepath}" like Jules web - one entry per file
                 if file_paths:
-                    for fp in file_paths:
-                        content_parts.append(f"Updated: {fp}")
-                    result["artifacts"].append({
-                        "type": "file_change",
-                        "files": file_paths,
-                        "patch": unidiff,
-                        "commitMsg": git_patch.get("suggestedCommitMessage", "")
-                    })
+                    # Filter to only NEW files not already reported in this session
+                    if seen_files is not None:
+                        new_files = [fp for fp in file_paths if fp not in seen_files]
+                        seen_files.update(new_files)  # Mark these as seen
+                    else:
+                        new_files = file_paths
+                    
+                    # Only add to content if there are new files
+                    if new_files:
+                        for fp in new_files:
+                            content_parts.append(f"Updated {fp}")
+                        
+                        result["artifacts"].append({
+                            "type": "file_change",
+                            "files": new_files,
+                            "patch": unidiff,
+                            "commitMsg": git_patch.get("suggestedCommitMessage", "")
+                        })
                 else:
                     commit_msg = git_patch.get("suggestedCommitMessage", "File updated")
                     result["artifacts"].append({
@@ -1133,14 +1244,14 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
                         "patch": unidiff,
                         "commitMsg": commit_msg
                     })
-                    content_parts.append(f"Updated: {commit_msg}")
+                    content_parts.append(f"Updated {commit_msg}")
             
             # Handle fileUpdated artifacts (single file updates)
             elif "fileUpdated" in art:
                 fu = art["fileUpdated"]
                 file_path = fu.get("path", "") or fu.get("filePath", "")
                 if file_path:
-                    content_parts.append(f"Updated: {file_path}")
+                    content_parts.append(f"Updated {file_path}")  # Show file path like Jules web
                     result["artifacts"].append({
                         "type": "file_change",
                         "files": [file_path],

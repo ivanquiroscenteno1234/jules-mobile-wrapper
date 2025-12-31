@@ -232,6 +232,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _isConnecting = false;
       });
       
+      // Pre-load branches if we have a repo context
+      if (widget.sourceId != null && widget.sourceId!.isNotEmpty) {
+        // sourceId is in format "repos/{owner}/{repo}"
+        final parts = widget.sourceId!.split('/');
+        if (parts.length >= 3) {
+          // Extract owner and repo from "repos/owner/repo"
+          _fetchBranches(parts[1], parts[2]);
+        }
+      } else if (widget.repoName.isNotEmpty && widget.repoName.contains('/')) {
+        // repoName is in format "owner/repo"
+        final parts = widget.repoName.split('/');
+        if (parts.length >= 2) {
+          _fetchBranches(parts[0], parts[1]);
+        }
+      }
+      
       // Auto-send initial prompt if provided
       if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
         // Small delay to ensure WebSocket is ready
@@ -543,39 +559,78 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _testChanges(String sessionId) async {
-    try {
-      // Show loading indicator
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-              SizedBox(width: 12),
-              Text('Generating test plan...'),
-            ],
+  Future<void> _testChanges(String sessionId, {String? prUrl}) async {
+    // Show full-screen blocking loading overlay
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Generating Test Plan...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Analyzing code changes and creating test objectives',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
           ),
-          duration: Duration(seconds: 10),
         ),
-      );
+      ),
+    );
+    
+    try {
+      // Build URL with optional pr_url parameter
+      var url = '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/generate-test';
+      final effectivePrUrl = prUrl ?? _createdPrUrl;
+      if (effectivePrUrl != null) {
+        url += '?pr_url=${Uri.encodeComponent(effectivePrUrl)}';
+      }
       
       final response = await http.post(
-        Uri.parse('${AppConfig.serverUrl}/sessions/$sessionId/generate-test'),
+        Uri.parse(url),
         headers: {
           'ngrok-skip-browser-warning': 'true',
           'Content-Type': 'application/json',
         },
       );
       
-      // Hide loading snackbar
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      // Dismiss loading dialog
+      if (mounted) Navigator.of(context).pop();
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final test = data['test'] as Map<String, dynamic>?;
         
         if (test != null && mounted) {
-          // Navigate to TestScreen with pre-filled data
+          // Navigate to TestScreen with pre-filled data including repository
           Navigator.pushNamed(
             context,
             '/test',
@@ -583,6 +638,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               'url': test['url'] ?? '/',
               'objective': test['objective'] ?? 'Verify changes work correctly',
               'steps': test['steps'] ?? [],
+              'repository': widget.sourceId,  // Pass the repository sourceId
+              'repoName': widget.repoName,    // Pass the display name
             },
           );
         }
@@ -602,13 +659,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
     } catch (e) {
+      // Dismiss loading dialog on error
+      if (mounted) Navigator.of(context).pop();
+      
       if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$e'.replaceAll('Exception: ', '')),
-            backgroundColor: Colors.red[600],
-            duration: const Duration(seconds: 5),
+            content: Text(
+              '$e'.replaceAll('Exception: ', ''),
+              style: const TextStyle(fontSize: 14),
+            ),
+            backgroundColor: Colors.red[700],
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
           ),
         );
       }
@@ -1572,8 +1639,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
-              ] else if (_createdBranchUrl != null) ...[
-                // Branch was created - show view button
+                // Test Changes button - also available after PR is created
+                if (sessionId != null) ...[
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => _testChanges(sessionId, prUrl: prUrl),
+                    icon: const Icon(Icons.science_outlined, size: 18),
+                    label: const Text('Test Changes'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange[600],
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 45),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ] else if (_createdBranchUrl != null) ...[                // Branch was created - show view button
                 ElevatedButton.icon(
                   onPressed: () => launchUrl(Uri.parse(_createdBranchUrl!), mode: LaunchMode.externalApplication),
                   icon: const Icon(Icons.open_in_new, size: 18),
@@ -1585,6 +1666,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
+                // Test Changes button - also available after branch is created
+                if (sessionId != null) ...[
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => _testChanges(sessionId, prUrl: prUrl),
+                    icon: const Icon(Icons.science_outlined, size: 18),
+                    label: const Text('Test Changes'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange[600],
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 45),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
               ] else if (hasPatch && sessionId != null) ...[
                 // No PR yet but we have patch data - show branch dropdown and action buttons
                 
@@ -1626,9 +1722,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   // Fetch branches on first tap if not loaded
                                   if (_availableBranches.isEmpty && message.repoName != null) {
                                     final parts = message.repoName!.split('/');
-                                    if (parts.length >= 1) {
-                                      // Get owner from source
-                                      _fetchBranches('ivanquiroscenteno1234', parts.last);
+                                    if (parts.length >= 2) {
+                                      // repoName is in format "owner/repo"
+                                      _fetchBranches(parts[0], parts[1]);
+                                    } else if (parts.length == 1) {
+                                      // Just repo name, try to get owner from session
+                                      _fetchBranches(parts[0], parts[0]);
                                     }
                                   }
                                 },
@@ -1639,7 +1738,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         icon: Icon(_isLoadingBranches ? Icons.hourglass_empty : Icons.refresh, size: 18),
                         onPressed: _isLoadingBranches ? null : () {
                           if (message.repoName != null) {
-                            _fetchBranches('ivanquiroscenteno1234', message.repoName!);
+                            final parts = message.repoName!.split('/');
+                            if (parts.length >= 2) {
+                              _fetchBranches(parts[0], parts[1]);
+                            }
                           }
                         },
                       ),
@@ -1695,20 +1797,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                // Test Changes button - generates AI test and navigates to Tester Agent
-                if (sessionId != null)
-                  ElevatedButton.icon(
-                    onPressed: () => _testChanges(sessionId),
-                    icon: const Icon(Icons.science_outlined, size: 18),
-                    label: const Text('Test Changes'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange[600],
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 45),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
               ] else if (julesUrl != null) ...[
                 // Fallback - open Jules Web
                 ElevatedButton.icon(
@@ -1812,7 +1900,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+        child: Text(
+          msg.content,
+          style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
+          softWrap: true,  // Allow text to wrap to multiple lines
+        ),
       ),
     );
   }

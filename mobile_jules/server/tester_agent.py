@@ -646,23 +646,27 @@ Respond with ONLY a JSON object:
         if file_list:
             files_context = f"\nAffected files:\n" + "\n".join(f"- {f}" for f in file_list[:10])
         
-        prompt = f"""You are a QA Engineer. Analyze the following code changes and generate a TEST OBJECTIVE.
+        prompt = f"""You are a Senior QA Engineer. Analyze the following code changes and generate a comprehensive TEST PLAN.
 
-ORIGINAL INSTRUCTIONS:
-{instructions or "Not provided"}
+ORIGINAL TASK/INSTRUCTIONS:
+{instructions or "Not provided - infer from code changes"}
 {files_context}
 
 CODE DIFF:
 {diff[:8000]}  # Truncate very long diffs
 
-Based on these changes, provide a structured test plan as JSON:
+Based on these changes, provide a detailed test plan as JSON:
 {{
     "url": "The most likely URL to test (e.g., /login, /dashboard). If unsure, use '/'",
-    "objective": "A clear test objective in 1-2 sentences",
-    "steps": ["Step 1: ...", "Step 2: ...", "Step 3: ..."]
+    "objective": "A detailed test objective (2-4 sentences) describing: (1) WHAT feature to test, (2) specific user actions, and (3) expected behavior. Be specific about what was implemented.",
+    "steps": ["Step 1: Navigate to...", "Step 2: Interact with...", "Step 3: Verify that...", "Step 4: ..."]
 }}
 
+IMPORTANT: The 'objective' field should be detailed enough that a tester knows exactly what to check.
+Example: "Verify that users can upload images in the chat. Navigate to the chat screen, tap the attachment icon, select an image from the gallery, and confirm that a preview appears above the input field. After sending, verify the image appears in the chat history."
+
 Respond with ONLY the JSON object."""
+
 
         try:
             response = await asyncio.to_thread(

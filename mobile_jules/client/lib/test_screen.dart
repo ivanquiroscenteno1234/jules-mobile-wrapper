@@ -64,6 +64,26 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       if (args['objective'] != null && _objectiveController.text.isEmpty) {
         _objectiveController.text = args['objective'] as String;
       }
+      // Preselect repository from chat session
+      if (args['repository'] != null && _selectedRepo == null) {
+        String repoValue = args['repository'] as String;
+        // Convert sourceId format (sources/github/owner/repo or repos/owner/repo) to full_name format (owner/repo)
+        if (repoValue.startsWith('sources/github/')) {
+          // Extract owner/repo from "sources/github/owner/repo"
+          repoValue = repoValue.substring('sources/github/'.length);
+        } else if (repoValue.startsWith('repos/')) {
+          // Extract owner/repo from "repos/owner/repo"
+          repoValue = repoValue.substring('repos/'.length);
+        }
+        // Now use repoName directly if it's in owner/repo format
+        final displayName = args['repoName'] as String?;
+        if (displayName != null && displayName.contains('/')) {
+          repoValue = displayName;  // Use the display name which is already owner/repo
+        }
+        setState(() {
+          _selectedRepo = repoValue;
+        });
+      }
     }
   }
 
@@ -607,19 +627,33 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
         
         const SizedBox(height: 16),
         
-        // Start Button
         SizedBox(
           width: double.infinity,
-          child: ElevatedButton.icon(
+          child: ElevatedButton(
             onPressed: _isRunning ? null : _startTest,
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Start Test'),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.all(16),
               backgroundColor: Colors.deepPurple,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
+            child: _isRunning
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+              : const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.play_arrow),
+                    SizedBox(width: 8),
+                    Text('Start Test'),
+                  ],
+                ),
           ),
         ),
       ],
@@ -868,6 +902,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     String? selectedRepo;
     List<Map<String, dynamic>> repos = [];
     bool isLoadingRepos = true;
+    bool isSaving = false;
     
     // Fetch repositories
     try {
@@ -932,41 +967,58 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: isSaving ? null : () => Navigator.pop(context, false),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: selectedRepo != null ? () => Navigator.pop(context, true) : null,
-              child: const Text('Save'),
+              onPressed: (selectedRepo == null || isSaving) 
+                ? null 
+                : () async {
+                    setDialogState(() => isSaving = true);
+                    try {
+                      final response = await http.post(
+                        Uri.parse(
+                          '${AppConfig.serverUrl}/test/$testId/save-as-preset'
+                          '?title=${Uri.encodeComponent(titleController.text)}'
+                          '&repo_full_name=${Uri.encodeComponent(selectedRepo!)}'
+                        ),
+                        headers: {'ngrok-skip-browser-warning': 'true'},
+                      );
+                      
+                      if (response.statusCode == 200) {
+                        if (context.mounted) Navigator.pop(context, true);
+                      } else {
+                        throw Exception('Failed to save preset');
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e')),
+                        );
+                        setDialogState(() => isSaving = false);
+                      }
+                    }
+                  },
+              child: isSaving
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Text('Save'),
             ),
           ],
         ),
       ),
     );
     
-    if (result == true && titleController.text.isNotEmpty && selectedRepo != null) {
-      try {
-        final response = await http.post(
-          Uri.parse(
-            '${AppConfig.serverUrl}/test/$testId/save-as-preset'
-            '?title=${Uri.encodeComponent(titleController.text)}'
-            '&repo_full_name=${Uri.encodeComponent(selectedRepo!)}'
-          ),
-          headers: {'ngrok-skip-browser-warning': 'true'},
-        );
-        
-        if (response.statusCode == 200) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Preset saved!')),
-          );
-        } else {
-          throw Exception('Failed to save preset');
-        }
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+    if (result == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Preset saved!')),
+      );
     }
   }
 

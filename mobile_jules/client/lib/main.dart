@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
 import 'chat_screen.dart';
 import 'creds_screen.dart';
+import 'test_screen.dart';
 import 'config.dart';
 
 // Global notification plugin instance
@@ -177,6 +178,15 @@ class _MyAppState extends State<MyApp> {
         if (settings.name == '/creds') {
           return MaterialPageRoute(
             builder: (context) => const CredsScreen(),
+          );
+        }
+        if (settings.name == '/test') {
+          final args = settings.arguments as Map<String, dynamic>?;
+          return MaterialPageRoute(
+            builder: (context) => TestScreen(
+              key: args != null ? ValueKey(args.hashCode) : null,
+            ),
+            settings: settings,
           );
         }
         return null;
