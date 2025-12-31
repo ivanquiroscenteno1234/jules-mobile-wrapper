@@ -6,10 +6,10 @@ import json
 import asyncio
 import uuid
 from typing import List, Dict, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 import google.generativeai as genai
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
@@ -30,6 +30,11 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
     print("WARNING: GEMINI_API_KEY not set. Speech-to-Text will not work.")
+
+# Create an uploads directory if it doesn't exist
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
 
 # Choose client based on environment
 if API_KEY:
@@ -58,6 +63,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve uploaded images statically
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Handles image uploads, saves them, and returns the filename."""
+    # Basic validation
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed.")
+    if file.size > 10 * 1024 * 1024:  # 10 MB limit
+        raise HTTPException(status_code=400, detail="Image size cannot exceed 10MB.")
+
+    # Generate a unique filename to prevent overwrites
+    ext = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+    # Save the file
+    try:
+        contents = await file.read()
+        with open(file_path, "wb") as buffer:
+            buffer.write(contents)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save file: {e}")
+
+    # Return the filename so the client can reference it
+    return {"filename": unique_filename}
+
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
@@ -853,51 +888,80 @@ async def _handle_websocket(
                         "type": "status",
                         "content": "Creating session and sending task to Jules..."
                     })
-                    
-                    # Create session with user's message as the actual task
+
+                    prompt_text = data
+                    image_filename = None
+                    try:
+                        # Check if the initial message is JSON
+                        message_data = json.loads(data)
+                        prompt_text = message_data.get("text", data) # Use text field if available
+                        image_filename = message_data.get("image_filename")
+                    except json.JSONDecodeError:
+                        pass # It's just plain text
+
+                    # Create session with the text part of the message
                     session_data = await client.create_session(
-                        source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
+                        source_id=source_id,
+                        prompt=prompt_text,
                         auto_mode=auto_mode
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
-                    
-                    # Extract session_id from response
-                    active_session_id = session_data.get("name")
+                    print(f"DEBUG: Created session with task: {prompt_text[:50]}...")
+
+                    active_session_id = session_data.get("name") # This should be like "sessions/xyz"
                     if not active_session_id:
-                        raw_id = session_data.get("id", "")
-                        active_session_id = f"sessions/{raw_id}" if raw_id else None
-                    
-                    if not active_session_id:
-                        await websocket.send_json({"type": "error", "content": "Could not create session"})
-                        continue
-                    
+                        raise Exception("Failed to get session name from creation response.")
+
                     # Track new session for notifications
                     if user_id:
                         session_poller.track_session(user_id, active_session_id)
                         print(f"Tracking new session {active_session_id} for user {user_id}")
-                    
+
                     # Send confirmation
                     await websocket.send_json({
                         "type": "system",
                         "content": "Session created! Jules is working on your task.",
                         "sessionId": active_session_id
                     })
-                    
-                    # Start polling for this session
+
+                    # NOW, if there was an image, send it as a follow-up message
+                    if image_filename:
+                        print(f"DEBUG: Sending initial image '{image_filename}' to new session {active_session_id}")
+                        await client.send_message_with_image(
+                            session_id=active_session_id,
+                            message=prompt_text, # Re-send prompt text for context with the image
+                            image_filename=image_filename
+                        )
+
+                    # Start polling AFTER session creation and potential first image message
                     poller_task = asyncio.create_task(poll_jules())
-                    
+
                 except Exception as e:
                     await websocket.send_json({"type": "error", "content": f"Failed to create session: {e}"})
-                    
+
             else:
                 # Session already exists, handle commands or send messages
                 if data.startswith("/approve"):
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
-                    # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    try:
+                        # Assume message is JSON with text and optional image
+                        message_data = json.loads(data)
+                        text = message_data.get("text", "")
+                        image_filename = message_data.get("image_filename")
+
+                        if image_filename:
+                            await client.send_message_with_image(
+                                session_id=active_session_id,
+                                message=text,
+                                image_filename=image_filename
+                            )
+                        elif text:
+                            # Send text-only message
+                            await client.send_message(active_session_id, text)
+                    except json.JSONDecodeError:
+                        # Fallback for old clients or plain text messages
+                        await client.send_message(active_session_id, data)
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")

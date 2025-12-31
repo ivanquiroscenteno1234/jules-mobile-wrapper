@@ -2,6 +2,8 @@ import os
 import httpx
 import asyncio
 from typing import List, Dict, Optional
+import base64
+import mimetypes
 
 class JulesClient:
     def __init__(self, api_key: str):
@@ -103,6 +105,65 @@ class JulesClient:
             # The response is usually empty or the updated session object; 
             # we rely on list_activities to get the actual answer.
             return resp.json()
+
+    async def send_message_with_image(self, session_id: str, message: str, image_filename: str):
+        """Sends a user message with an image to an existing session."""
+        url = f"{self.base_url}/{session_id}:sendMessage"
+        
+        # Prepare the image payload
+        image_payload = self._prepare_image_payload(image_filename)
+        if not image_payload:
+             # Fallback to sending just the text if image processing fails
+            return await self.send_message(session_id, message)
+            
+        payload = {
+            "prompt": message,
+            "visualContexts": [image_payload]
+        }
+        
+        print(f"DEBUG send_message_with_image: payload keys={list(payload.keys())}, image mime={image_payload['mimeType']}", flush=True)
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                headers=self.headers,
+                json=payload,
+                timeout=60.0 # Increase timeout for uploads
+            )
+            if not resp.is_success:
+                 print(f"DEBUG send_message_with_image error {resp.status_code}: {resp.text}", flush=True)
+            resp.raise_for_status()
+            return resp.json()
+
+    def _prepare_image_payload(self, filename: str) -> Optional[Dict]:
+        """Reads an image, base64 encodes it, and returns the payload dict."""
+        from main import UPLOAD_DIR # Use UPLOAD_DIR from main
+        
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        if not os.path.exists(filepath):
+            print(f"ERROR: Image file not found at {filepath}")
+            return None
+        
+        try:
+            # Guess the MIME type of the file
+            mime_type, _ = mimetypes.guess_type(filepath)
+            if not mime_type or not mime_type.startswith("image/"):
+                print(f"ERROR: Invalid MIME type '{mime_type}' for {filename}")
+                return None
+
+            # Read the file in binary mode and encode it
+            with open(filepath, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            return {
+                "image": {
+                    "data": encoded_string,
+                    "mimeType": mime_type
+                }
+            }
+        except Exception as e:
+            print(f"ERROR: Failed to process image {filename}: {e}")
+            return None
 
     async def get_session(self, session_id: str) -> Dict:
         """Gets a session's current state."""

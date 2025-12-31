@@ -5,12 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'dart:io';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 import 'main.dart' show showNotification;
+import 'package:image_picker/image_picker.dart';
 
 class ChatMessage {
   final String id;
@@ -29,6 +31,7 @@ class ChatMessage {
   final bool? hasPatch;
   final String? sessionId;
   final List<Map<String, dynamic>>? artifacts;
+  final String? imageUrl; // For local and remote images
 
   ChatMessage({
     required this.id,
@@ -36,6 +39,7 @@ class ChatMessage {
     this.originator = 'agent',
     this.timestamp,
     this.type = 'message',
+    this.imageUrl,
     this.planId,
     this.steps,
     this.title,
@@ -67,15 +71,17 @@ class ChatMessage {
       hasPatch: json['hasPatch'],
       sessionId: json['sessionId'],
       artifacts: json['artifacts'] != null ? List<Map<String, dynamic>>.from(json['artifacts']) : null,
+      imageUrl: json['imageUrl'],
     );
   }
 
-  factory ChatMessage.user(String text) {
+  factory ChatMessage.user(String text, {String? imageUrl}) {
     return ChatMessage(
       id: 'user_${DateTime.now().millisecondsSinceEpoch}',
       type: 'user',
       originator: 'user',
       content: text,
+      imageUrl: imageUrl,
     );
   }
 }
@@ -150,6 +156,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // UX Improvements
   String? _currentProgressTitle;
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
+  File? _imageFile; // For storing the selected image
 
   @override
   void dispose() {
@@ -398,9 +405,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _sendMessage() {
-    if (_controller.text.isNotEmpty && _isConnected) {
-      _sendMessageText(_controller.text);
+    if ((_controller.text.isNotEmpty || _imageFile != null) && _isConnected) {
+      if (_imageFile != null) {
+        _uploadAndSendMessage(_controller.text, _imageFile!);
+      } else {
+        _sendMessageText(_controller.text);
+      }
       _controller.clear();
+      setState(() {
+        _imageFile = null;
+      });
     }
   }
   
@@ -413,6 +427,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       
       _channel.sink.add(text);
       _scrollToBottom();
+    }
+  }
+
+  Future<void> _uploadAndSendMessage(String text, File imageFile) async {
+    setState(() {
+      _isWaiting = true;
+      _messages.add(ChatMessage.user(text, imageUrl: imageFile.path));
+      _scrollToBottom();
+    });
+
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${AppConfig.serverUrl}/upload-image'),
+      );
+      request.headers['ngrok-skip-browser-warning'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+      
+      final response = await request.send();
+      
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        final filename = data['filename'];
+        
+        final messagePayload = jsonEncode({
+          'text': text,
+          'image_filename': filename,
+        });
+        
+        _channel.sink.add(messagePayload);
+      } else {
+        throw Exception('Image upload failed with status: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Upload and send error: $e');
+      setState(() {
+        _isWaiting = false;
+        _messages.add(ChatMessage(id: 'error', type: 'system', content: 'Error: Could not send image.'));
+      });
     }
   }
 
@@ -751,6 +805,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    try {
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      if (pickedFile != null) {
+        setState(() {
+          _imageFile = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('Image picker error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking image: $e')),
+        );
+      }
+    }
+  }
+
   void _showCreateRepoDialog() {
     final TextEditingController nameController = TextEditingController();
     final TextEditingController descController = TextEditingController();
@@ -1013,10 +1086,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+
+          // Image Preview
+          if (_imageFile != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Stack(
+                alignment: Alignment.topRight,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      _imageFile!,
+                      height: 100,
+                      width: 100,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.cancel, color: Colors.white70),
+                    onPressed: () => setState(() => _imageFile = null),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: const Icon(Icons.attach_file),
+                  color: Colors.deepPurple,
+                  onPressed: _pickImage,
+                  tooltip: 'Attach Image',
+                ),
                 IconButton(
                   icon: _isRecording 
                       ? const Icon(Icons.stop, color: Colors.red) 
@@ -1854,6 +1957,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildUserBubble(ChatMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasImage = msg.imageUrl != null && msg.imageUrl!.isNotEmpty;
+    final hasText = msg.content.isNotEmpty;
+
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
@@ -1863,7 +1969,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? Colors.deepPurple[700] : Colors.deepPurple[100],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasImage)
+              Padding(
+                padding: EdgeInsets.only(bottom: hasText ? 8.0 : 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8.0),
+                  // Check if it's a local file path or a network URL
+                  child: msg.imageUrl!.startsWith('/')
+                      ? Image.file(
+                          File(msg.imageUrl!),
+                          height: 150,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        )
+                      : Image.network(
+                          '${AppConfig.serverUrl}${msg.imageUrl}', // Assumes server returns relative path
+                          height: 150,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            return progress == null ? child : const Center(child: CircularProgressIndicator());
+                          },
+                        ),
+                ),
+              ),
+            if (hasText)
+              Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+          ],
+        ),
       ),
     );
   }
@@ -1888,6 +2024,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildJulesBubble(ChatMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasImage = msg.imageUrl != null && msg.imageUrl!.isNotEmpty;
+    final hasText = msg.content.isNotEmpty;
+
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
@@ -1900,10 +2039,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(
-          msg.content,
-          style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
-          softWrap: true,  // Allow text to wrap to multiple lines
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasImage)
+              Padding(
+                padding: EdgeInsets.only(bottom: hasText ? 8.0 : 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8.0),
+                  child: Image.network(
+                    '${AppConfig.serverUrl}${msg.imageUrl}',
+                    height: 150,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      return progress == null ? child : const Center(child: CircularProgressIndicator());
+                    },
+                  ),
+                ),
+              ),
+            if (hasText)
+              Text(
+                msg.content,
+                style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
+                softWrap: true,
+              ),
+          ],
         ),
       ),
     );
