@@ -637,6 +637,37 @@ async def create_github_pr(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from fastapi.staticfiles import StaticFiles
+import shutil
+
+# Mount the 'uploads' directory to serve static files
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+# ===== Image Upload Endpoint =====
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Accepts an image upload and saves it to the server."""
+    try:
+        # Sanitize filename
+        file_ext = os.path.splitext(file.filename)[1]
+        if file_ext.lower() not in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        
+        # Create a unique filename
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        # Save the file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {"filename": unique_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Repoless WebSocket endpoint - no source_id required
 @app.websocket("/chat")
 async def websocket_repoless_endpoint(
@@ -786,7 +817,19 @@ async def _handle_websocket(
     try:
         while True:
             # Wait for user message from phone
-            data = await websocket.receive_text()
+            raw_data = await websocket.receive_text()
+            
+            # Parse message to handle both plain text and JSON with image
+            text_message = ""
+            image_filename = None
+            try:
+                # New format: JSON for text + optional image
+                json_data = json.loads(raw_data)
+                text_message = json_data.get("text", "")
+                image_filename = json_data.get("image_filename")
+            except json.JSONDecodeError:
+                # Old format: plain text for backward compatibility
+                text_message = raw_data
             
             # If no session yet, create one with this message as the task
             if not active_session_id:
@@ -799,10 +842,11 @@ async def _handle_websocket(
                     # Create session with user's message as the actual task
                     session_data = await client.create_session(
                         source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
-                        auto_mode=auto_mode
+                        prompt=text_message,
+                        auto_mode=auto_mode,
+                        image_filename=image_filename
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    print(f"DEBUG: Created session with task: {text_message[:50]}...")
                     
                     # Extract session_id from response
                     active_session_id = session_data.get("name")
@@ -834,12 +878,16 @@ async def _handle_websocket(
                     
             else:
                 # Session already exists, handle commands or send messages
-                if data.startswith("/approve"):
+                if text_message.startswith("/approve"):
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
                     # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    await client.send_message(
+                        session_id=active_session_id,
+                        message=text_message,
+                        image_filename=image_filename
+                    )
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")

@@ -1,6 +1,7 @@
 import os
 import httpx
 import asyncio
+import base64
 from typing import List, Dict, Optional
 
 class JulesClient:
@@ -11,6 +12,35 @@ class JulesClient:
             "X-Goog-Api-Key": self.api_key,
             "Content-Type": "application/json"
         }
+
+    def _prepare_image_payload(self, image_filename: str) -> Optional[Dict]:
+        """Reads an image, base64 encodes it, and returns the payload part."""
+        if not image_filename:
+            return None
+        
+        try:
+            image_path = os.path.join("uploads", image_filename)
+            with open(image_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            # Determine MIME type from file extension
+            mime_type = "image/jpeg"
+            if image_filename.lower().endswith('.png'):
+                mime_type = "image/png"
+            elif image_filename.lower().endswith('.gif'):
+                mime_type = "image/gif"
+            elif image_filename.lower().endswith('.webp'):
+                mime_type = "image/webp"
+
+            return {
+                "image": {
+                    "mimeType": mime_type,
+                    "data": encoded_string
+                }
+            }
+        except Exception as e:
+            print(f"Error preparing image payload: {e}")
+            return None
 
     async def list_sources(self) -> List[Dict]:
         """Lists available sources (GitHub repos)."""
@@ -37,21 +67,14 @@ class JulesClient:
 
     async def create_session(
         self, 
-        source_id: str = None,  # Now optional for repoless sessions
+        source_id: str = None,
         prompt: str = "Start session",
         auto_mode: bool = False,
         starting_branch: str = None,
-        title: str = None
+        title: str = None,
+        image_filename: str = None
     ) -> Dict:
-        """Creates a new chat session.
-        
-        Args:
-            source_id: The source (repo) to work with. If None, creates a repoless session.
-            prompt: Initial task description
-            auto_mode: If True, auto-approve plans and auto-create PRs (only for repo sessions)
-            starting_branch: Optional branch to start from (only for repo sessions)
-            title: Optional title for the session
-        """
+        """Creates a new chat session, optionally with an image."""
         payload = {
             "prompt": prompt,
             "requirePlanApproval": True
@@ -60,48 +83,52 @@ class JulesClient:
         if title:
             payload["title"] = title
         
+        if image_filename:
+            image_payload = self._prepare_image_payload(image_filename)
+            if image_payload:
+                payload["visualContexts"] = [image_payload]
+        
         if source_id:
-            # Repo-based session - ALWAYS include githubRepoContext with startingBranch
             payload["sourceContext"] = {
                 "source": source_id,
-                "githubRepoContext": {
-                    "startingBranch": starting_branch or "main"
-                }
+                "githubRepoContext": {"startingBranch": starting_branch or "main"}
             }
             if auto_mode:
                 payload["automationMode"] = "AUTO_CREATE_PR"
                 payload["requirePlanApproval"] = False
-        # For repoless sessions, omit sourceContext entirely
-            
+        
         print(f"DEBUG create_session payload: {payload}", flush=True)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.base_url}/sessions",
                 headers=self.headers,
-                json=payload
+                json=payload,
+                timeout=60.0 # Increase timeout for uploads
             )
             if not resp.is_success:
                 print(f"DEBUG create_session error {resp.status_code}: {resp.text}", flush=True)
             resp.raise_for_status()
             return resp.json()
 
-    async def send_message(self, session_id: str, message: str):
-        """Sends a user message to an existing session."""
-        # Note: session_id usually comes in full form "sessions/123..."
-        # If the API expects just the ID, we might need to parse it, 
-        # but the docs show using the full resource name in the URL.
+    async def send_message(self, session_id: str, message: str, image_filename: str = None):
+        """Sends a user message to an existing session, optionally with an image."""
         url = f"{self.base_url}/{session_id}:sendMessage"
         
         payload = {"prompt": message}
+        
+        if image_filename:
+            image_payload = self._prepare_image_payload(image_filename)
+            if image_payload:
+                payload["visualContexts"] = [image_payload]
+        
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
                 headers=self.headers,
-                json=payload
+                json=payload,
+                timeout=60.0 # Increase timeout for uploads
             )
             resp.raise_for_status()
-            # The response is usually empty or the updated session object; 
-            # we rely on list_activities to get the actual answer.
             return resp.json()
 
     async def get_session(self, session_id: str) -> Dict:

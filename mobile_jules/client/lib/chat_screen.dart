@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
@@ -29,6 +31,7 @@ class ChatMessage {
   final bool? hasPatch;
   final String? sessionId;
   final List<Map<String, dynamic>>? artifacts;
+  final String? imageUrl;
 
   ChatMessage({
     required this.id,
@@ -47,6 +50,7 @@ class ChatMessage {
     this.hasPatch,
     this.sessionId,
     this.artifacts,
+    this.imageUrl,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -67,15 +71,17 @@ class ChatMessage {
       hasPatch: json['hasPatch'],
       sessionId: json['sessionId'],
       artifacts: json['artifacts'] != null ? List<Map<String, dynamic>>.from(json['artifacts']) : null,
+      imageUrl: json['imageUrl'],
     );
   }
 
-  factory ChatMessage.user(String text) {
+  factory ChatMessage.user(String text, {String? imageUrl}) {
     return ChatMessage(
       id: 'user_${DateTime.now().millisecondsSinceEpoch}',
       type: 'user',
       originator: 'user',
       content: text,
+      imageUrl: imageUrl,
     );
   }
 }
@@ -146,6 +152,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   bool _isTranscribing = false;
+
+  // Image attachment
+  final ImagePicker _picker = ImagePicker();
+  XFile? _selectedImage;
+  bool _isUploading = false;
 
   // UX Improvements
   String? _currentProgressTitle;
@@ -381,23 +392,57 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _sendMessage() {
-    if (_controller.text.isNotEmpty && _isConnected) {
-      _sendMessageText(_controller.text);
-      _controller.clear();
+  void _sendMessage() async {
+    if ((_controller.text.isEmpty && _selectedImage == null) || !_isConnected) {
+      return;
     }
-  }
-  
-  void _sendMessageText(String text) {
-    if (text.isNotEmpty && _isConnected) {
-      setState(() {
-        _messages.add(ChatMessage.user(text));
-        _isWaiting = true;
-      });
-      
-      _channel.sink.add(text);
-      _scrollToBottom();
+
+    final text = _controller.text;
+    final image = _selectedImage;
+
+    // Show user message immediately
+    setState(() {
+      _messages.add(ChatMessage.user(text, imageUrl: image?.path));
+      _isWaiting = true;
+      _isUploading = image != null;
+    });
+    _controller.clear();
+    _selectedImage = null;
+    _scrollToBottom();
+
+    String? imageFilename;
+
+    // Step 1: Upload image if it exists
+    if (image != null) {
+      try {
+        final request = http.MultipartRequest('POST', Uri.parse('${AppConfig.serverUrl}/upload-image'));
+        request.files.add(await http.MultipartFile.fromPath('file', image.path));
+        final response = await request.send();
+
+        if (response.statusCode == 200) {
+          final respStr = await response.stream.bytesToString();
+          final data = jsonDecode(respStr);
+          imageFilename = data['filename'];
+        } else {
+          throw Exception('Image upload failed');
+        }
+      } catch (e) {
+        setState(() {
+          _messages.add(ChatMessage(id: 'error', type: 'system', content: 'Error uploading image: $e'));
+          _isWaiting = false;
+        });
+        return;
+      } finally {
+        setState(() => _isUploading = false);
+      }
     }
+
+    // Step 2: Send message via WebSocket
+    final payload = {
+      'text': text,
+      'image_filename': imageFilename,
+    };
+    _channel.sink.add(jsonEncode(payload));
   }
 
   void _approvePlan() {
@@ -948,42 +993,100 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Row(
+            child: Column(
               children: [
-                IconButton(
-                  icon: _isRecording 
-                      ? const Icon(Icons.stop, color: Colors.red) 
-                      : _isTranscribing 
-                          ? const SizedBox(
-                              width: 20, 
-                              height: 20, 
-                              child: CircularProgressIndicator(strokeWidth: 2)
-                            )
-                          : const Icon(Icons.mic, color: Colors.deepPurple),
-                  onPressed: _isTranscribing ? null : _toggleRecording,
-                  tooltip: _isRecording ? 'Stop recording' : 'Voice input',
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 5,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    decoration: const InputDecoration(
-                      hintText: 'Ask Jules something...',
-                      border: OutlineInputBorder(),
+                if (_selectedImage != null) _buildImagePreview(),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: _pickImage,
+                      tooltip: 'Attach Image',
                     ),
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  color: Colors.deepPurple,
-                  onPressed: _isWaiting ? null : _sendMessage,
+                    IconButton(
+                      icon: _isRecording 
+                          ? const Icon(Icons.stop, color: Colors.red) 
+                          : _isTranscribing 
+                              ? const SizedBox(
+                                  width: 20, 
+                                  height: 20, 
+                                  child: CircularProgressIndicator(strokeWidth: 2)
+                                )
+                              : const Icon(Icons.mic, color: Colors.deepPurple),
+                      onPressed: _isTranscribing ? null : _toggleRecording,
+                      tooltip: _isRecording ? 'Stop recording' : 'Voice input',
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        minLines: 1,
+                        maxLines: 5,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          hintText: 'Ask Jules something...',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      color: Colors.deepPurple,
+                      onPressed: _isWaiting ? null : _sendMessage,
+                    ),
+                  ],
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickImage() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    setState(() {
+      _selectedImage = image;
+    });
+  }
+
+  Widget _buildImagePreview() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8.0),
+            child: Image.file(
+              File(_selectedImage!.path),
+              height: 100,
+              width: 100,
+              fit: BoxFit.cover,
+            ),
+          ),
+          Positioned(
+            top: 0,
+            right: 0,
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedImage = null;
+                });
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
             ),
           ),
         ],
@@ -1766,6 +1869,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildUserBubble(ChatMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasImage = msg.imageUrl != null;
+    final hasText = msg.content.isNotEmpty;
+
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
@@ -1775,7 +1881,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? Colors.deepPurple[700] : Colors.deepPurple[100],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasImage)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: Image.file(
+                  File(msg.imageUrl!),
+                  height: 150,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            if (hasImage && hasText) const SizedBox(height: 8),
+            if (hasText)
+              Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+          ],
+        ),
       ),
     );
   }
