@@ -804,12 +804,15 @@ async def _handle_websocket(
                 activities = await client.list_activities(session_id, page_size=100, get_all=True)
                 print(f"DEBUG: Found {len(activities)} historical activities", flush=True)
                 
+                # Track seen files to avoid duplicate "Updated" messages
+                history_seen_files = set()
+                
                 # Send activities in order (already chronological - oldest first for display)
                 for activity in activities:
                     act_id = activity.get("id") or activity.get("name")
                     if act_id:
                         seen_activity_ids.add(act_id)
-                        parsed = parse_activity(activity, session_data=session_data)
+                        parsed = parse_activity(activity, session_data=session_data, seen_files=history_seen_files)
                         if parsed:
                             await websocket.send_json(parsed)
                 
@@ -904,6 +907,61 @@ async def _handle_websocket(
     finally:
         if 'poller_task' in dir() and poller_task:
             poller_task.cancel()
+
+import re
+
+def extract_files_from_text(text: str, diff_files: List[str] = None) -> List[str]:
+    """Extract file paths mentioned in message text.
+    
+    Matches patterns like:
+    - `path/to/file.ext` or `file.ext`
+    - 'path/to/file.ext' or 'file.ext'
+    - path/to/file.ext (common file extensions)
+    
+    If diff_files is provided, simple filenames will be matched against
+    the full paths to resolve them.
+    """
+    if not text:
+        return []
+    
+    files = []
+    
+    # Match backtick-quoted file paths: `path/to/file.ext`
+    backtick_pattern = r'`([^`]+\.[a-zA-Z]{1,5})`'
+    files.extend(re.findall(backtick_pattern, text))
+    
+    # Match single-quoted file paths: 'path/to/file.ext'
+    quote_pattern = r"'([^']+\.[a-zA-Z]{1,5})'"
+    files.extend(re.findall(quote_pattern, text))
+    
+    # Match common file extensions without quotes: path/to/file.ext
+    common_extensions = r'\b(\S+\.(?:py|dart|yaml|yml|json|ts|tsx|js|jsx|md|txt|html|css|scss|java|kt|swift|go|rs|rb|php|c|cpp|h|hpp))\b'
+    files.extend(re.findall(common_extensions, text, re.IGNORECASE))
+    
+    # Deduplicate while preserving order
+    seen = set()
+    unique_files = []
+    for f in files:
+        if f not in seen:
+            seen.add(f)
+            unique_files.append(f)
+    
+    # If we have diff_files, resolve simple filenames to full paths
+    if diff_files:
+        resolved = []
+        for f in unique_files:
+            if '/' in f:
+                # Already a full path
+                resolved.append(f)
+            else:
+                # Simple filename - try to find matching full path in diff
+                for diff_path in diff_files:
+                    if diff_path.endswith('/' + f) or diff_path == f:
+                        resolved.append(diff_path)
+                        break
+        return resolved
+    
+    return unique_files
 
 def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = None) -> Dict:
     """Converts a Jules Activity JSON into a structured dict for the Flutter app.
@@ -1094,19 +1152,28 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             description = progress.get("description", "")
             
             # Determine if this is just a status update or a real message
-            # Status updates: short progress titles without artifacts
-            # Real messages: have description or will have artifacts
+            # Status updates: short progress titles without artifacts or description
+            # Real messages: have description (the explanation text) or will have artifacts
             has_artifacts = "artifacts" in activity and len(activity["artifacts"]) > 0
             
-            if title and (has_artifacts or description):
-                # This is a real message - use description as content (it's complete)
-                # Jules API often truncates title with "..." but description has full text
+            # If we have a description, it's a real explanatory message (e.g., "I have successfully modified...")
+            if description:
+                # This is a real message - combine title and description for full context
+                # Title is often a short action summary, description has the details
                 result["type"] = "message"
                 result["originator"] = "agent"
-                result["content"] = description if description else title
-                if title and description:
-                    result["title"] = title  # Keep title as optional short summary
-                print(f"DEBUG progressUpdated: message = '{(description or title)[:100]}'", flush=True)
+                # Combine title + description like on Jules web
+                if title and title not in description:
+                    result["content"] = f"{title}\n{description}"
+                else:
+                    result["content"] = description
+                print(f"DEBUG progressUpdated: message = '{result['content'][:100]}'", flush=True)
+            elif title and has_artifacts:
+                # Has title and artifacts but no description
+                result["type"] = "message"
+                result["originator"] = "agent"
+                result["content"] = title
+                print(f"DEBUG progressUpdated: message with title+artifacts = '{title[:100]}'", flush=True)
             elif title:
                 # Just a status update (no artifacts, no description) - update working indicator
                 result["type"] = "progress"
@@ -1194,57 +1261,40 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                 git_patch = cs.get("gitPatch", {})
                 unidiff = git_patch.get("unidiffPatch", "")
                 
-                # Extract file paths from the unidiff patch (lines starting with +++ b/ or --- a/)
-                file_paths = []
+                # First, parse files from the cumulative diff (for resolving simple filenames)
+                diff_files = []
                 for line in unidiff.split("\n"):
-                    # Handle "+++ b/path/file.tsx" format
                     if line.startswith("+++ b/"):
-                        path = line[6:].strip()  # Skip "+++ b/" prefix
-                        if path and path != "/dev/null" and path not in file_paths:
-                            file_paths.append(path)
-                    # Handle "--- a/path/file.tsx" format  
-                    elif line.startswith("--- a/"):
-                        path = line[6:].strip()  # Skip "--- a/" prefix
-                        if path and path != "/dev/null" and path not in file_paths:
-                            file_paths.append(path)
-                    # Handle "+++ path/file.tsx" format (no a/b prefix)
+                        path = line[6:].strip()
+                        if path and path != "/dev/null" and path not in diff_files:
+                            diff_files.append(path)
                     elif line.startswith("+++ ") and not line.startswith("+++\t"):
                         path = line[4:].strip()
-                        if path and path != "/dev/null" and path not in file_paths:
-                            file_paths.append(path)
-                    elif line.startswith("--- ") and not line.startswith("---\t"):
-                        path = line[4:].strip()
-                        if path and path != "/dev/null" and path not in file_paths:
-                            file_paths.append(path)
+                        if path and path != "/dev/null" and path not in diff_files:
+                            diff_files.append(path)
                 
-                # Show "Updated {filepath}" like Jules web - one entry per file
-                if file_paths:
-                    # Filter to only NEW files not already reported in this session
-                    if seen_files is not None:
-                        new_files = [fp for fp in file_paths if fp not in seen_files]
-                        seen_files.update(new_files)  # Mark these as seen
-                    else:
-                        new_files = file_paths
-                    
-                    # Only add to content if there are new files
-                    if new_files:
-                        for fp in new_files:
-                            content_parts.append(f"Updated {fp}")
-                        
-                        result["artifacts"].append({
-                            "type": "file_change",
-                            "files": new_files,
-                            "patch": unidiff,
-                            "commitMsg": git_patch.get("suggestedCommitMessage", "")
-                        })
-                else:
-                    commit_msg = git_patch.get("suggestedCommitMessage", "File updated")
-                    result["artifacts"].append({
-                        "type": "file_change",
-                        "patch": unidiff,
-                        "commitMsg": commit_msg
-                    })
-                    content_parts.append(f"Updated {commit_msg}")
+                # Get the message text to extract mentioned files
+                message_text = result.get("content", "")
+                
+                # Extract files mentioned in the message and resolve to full paths
+                # Jules web shows only files explicitly mentioned in the step description
+                mentioned_files = extract_files_from_text(message_text, diff_files)
+                print(f"DEBUG: Message text: {message_text[:100] if message_text else 'empty'}", flush=True)
+                print(f"DEBUG: Diff files: {diff_files}", flush=True)
+                print(f"DEBUG: Files mentioned in message: {mentioned_files}", flush=True)
+                
+                # Show "Updated {filepath}" only for files mentioned in this step
+                if mentioned_files:
+                    for fp in mentioned_files:
+                        content_parts.append(f"Updated {fp}")
+                
+                # Always store the full patch for viewing/PR creation
+                result["artifacts"].append({
+                    "type": "file_change",
+                    "files": mentioned_files if mentioned_files else [],
+                    "patch": unidiff,
+                    "commitMsg": git_patch.get("suggestedCommitMessage", "")
+                })
             
             # Handle fileUpdated artifacts (single file updates)
             elif "fileUpdated" in art:

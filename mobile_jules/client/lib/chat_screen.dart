@@ -234,16 +234,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       
       // Pre-load branches if we have a repo context
       if (widget.sourceId != null && widget.sourceId!.isNotEmpty) {
-        // sourceId is in format "repos/{owner}/{repo}"
-        final parts = widget.sourceId!.split('/');
-        if (parts.length >= 3) {
-          // Extract owner and repo from "repos/owner/repo"
-          _fetchBranches(parts[1], parts[2]);
+        final sourceId = widget.sourceId!;
+        String? owner, repo;
+        
+        // Handle "sources/github/owner/repo" format
+        if (sourceId.startsWith('sources/github/')) {
+          final repoPath = sourceId.substring('sources/github/'.length);
+          final parts = repoPath.split('/');
+          if (parts.length >= 2) {
+            owner = parts[0];
+            repo = parts[1];
+          }
+        }
+        // Handle "repos/owner/repo" format
+        else if (sourceId.startsWith('repos/')) {
+          final repoPath = sourceId.substring('repos/'.length);
+          final parts = repoPath.split('/');
+          if (parts.length >= 2) {
+            owner = parts[0];
+            repo = parts[1];
+          }
+        }
+        // Handle "owner/repo" format
+        else if (sourceId.contains('/')) {
+          final parts = sourceId.split('/');
+          if (parts.length >= 2) {
+            owner = parts[0];
+            repo = parts[1];
+          }
+        }
+        
+        if (owner != null && repo != null) {
+          print('Pre-loading branches for $owner/$repo');
+          _fetchBranches(owner, repo);
         }
       } else if (widget.repoName.isNotEmpty && widget.repoName.contains('/')) {
         // repoName is in format "owner/repo"
         final parts = widget.repoName.split('/');
         if (parts.length >= 2) {
+          print('Pre-loading branches from repoName: ${parts[0]}/${parts[1]}');
           _fetchBranches(parts[0], parts[1]);
         }
       }
@@ -319,16 +348,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _pendingPlanId = null;
               }
 
-              // Update progress title
+              // Update progress title for working indicator - only use in-progress messages
               if (chatMsg.type == 'progress') {
-                _currentProgressTitle = chatMsg.content;
+                final content = chatMsg.content?.toLowerCase() ?? '';
+                // Skip past-tense progress messages (completed actions shouldn't be working indicator)
+                final isPastTense = content.endsWith('ed') || 
+                    content.contains('completed') || 
+                    content.contains('reviewed') ||
+                    content.contains('finished') ||
+                    content.contains('done');
+                if (!isPastTense) {
+                  _currentProgressTitle = chatMsg.content;
+                }
+              }
+              
+              // Clear progress title on real messages (Jules finished that step)
+              if (chatMsg.type == 'message' || chatMsg.type == 'artifact') {
+                _currentProgressTitle = null;  // Reset to default "Jules is working..."
               }
               
               // Only stop waiting on completion events or when Jules needs input
-              // Keep waiting for: progress, status, artifact messages
+              // Keep waiting for: progress, status, artifact, and regular messages while working
               if (chatMsg.type == 'completed' || 
                   chatMsg.type == 'plan' ||
-                  chatMsg.type == 'message') {
+                  chatMsg.type == 'error') {
                 _isWaiting = false;
               }
             });
