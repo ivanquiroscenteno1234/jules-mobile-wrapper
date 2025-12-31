@@ -934,21 +934,138 @@ def parse_activity(activity: Dict, session_data: Dict = None) -> Dict:
 
     return result
 
+# ===== MCP Server Management =====
+import socket
+import subprocess
+import signal
+
+MCP_PORT = 8931
+mcp_process = None
+
+def is_mcp_port_in_use(port: int = MCP_PORT) -> bool:
+    """Check if MCP server port is already in use."""
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            if s.connect_ex(('::1', port)) == 0:
+                return True
+    except:
+        pass
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            return s.connect_ex(('localhost', port)) == 0
+    except:
+        return False
+
+def start_mcp_server(port: int = MCP_PORT):
+    """Start the ExecuteAutomation Playwright MCP server."""
+    global mcp_process
+    
+    if is_mcp_port_in_use(port):
+        print(f"✅ MCP server already running on port {port}")
+        return True
+    
+    print(f"🚀 Starting MCP server on port {port}...")
+    
+    try:
+        if os.name == 'nt':
+            mcp_process = subprocess.Popen(
+                f'npx @executeautomation/playwright-mcp-server --port {port}',
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                shell=True,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        else:
+            mcp_process = subprocess.Popen(
+                ["npx", "@executeautomation/playwright-mcp-server", "--port", str(port)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+        
+        # Wait for server to be ready (max 30 seconds)
+        import time
+        for i in range(60):
+            if is_mcp_port_in_use(port):
+                print(f"✅ MCP server ready on port {port}")
+                return True
+            time.sleep(0.5)
+        
+        print("⚠️ MCP server may not be fully ready")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to start MCP server: {e}")
+        return False
+
+def stop_mcp_server():
+    """Stop the MCP server process."""
+    global mcp_process
+    if mcp_process:
+        print("🛑 Stopping MCP server...")
+        try:
+            if os.name == 'nt':
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(mcp_process.pid)], capture_output=True)
+            else:
+                os.killpg(os.getpgid(mcp_process.pid), signal.SIGTERM)
+            mcp_process.wait(timeout=5)
+        except Exception as e:
+            print(f"⚠️ Error stopping MCP server: {e}")
+            mcp_process.kill()
+        mcp_process = None
+        print("✅ MCP server stopped")
+
 # ===== Tester Agent Endpoints =====
 
 class TestRequest(BaseModel):
     url: str
     objective: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+URL_HISTORY_FILE = "test_urls.json"
+
+def save_url_to_history(url: str):
+    """Save unique URL to history file."""
+    urls = []
+    if os.path.exists(URL_HISTORY_FILE):
+        try:
+            with open(URL_HISTORY_FILE, "r") as f:
+                urls = json.load(f)
+        except:
+            urls = []
+            
+    if url not in urls:
+        urls.append(url)
+        with open(URL_HISTORY_FILE, "w") as f:
+            json.dump(urls, f)
 
 @app.post("/test/start")
-async def start_test(request: TestRequest, background_tasks: BackgroundTasks):
+async def start_test(request: TestRequest):
     """Start a new test with the Tester Agent."""
+    # Start MCP server if not running
+    start_mcp_server()
+    
     test_id = str(uuid.uuid4())[:8]
+    save_url_to_history(request.url)
     
-    async def run_test():
-        await tester_agent.run_test(test_id, request.url, request.objective)
+    # Start the test as a background async task in the current event loop
+    # This works because we're in an async endpoint (not using background_tasks)
+    asyncio.create_task(
+        tester_agent.run_test(
+            test_id, 
+            request.url, 
+            request.objective,
+            username=request.username,
+            password=request.password
+        )
+    )
     
-    background_tasks.add_task(asyncio.create_task, run_test())
+    # Small delay to ensure test is registered
+    await asyncio.sleep(0.1)
     
     return {
         "test_id": test_id,
@@ -964,6 +1081,17 @@ async def get_test_status(test_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="Test not found")
     return tester_agent.to_json(result)
+
+@app.get("/test/urls")
+async def get_test_urls():
+    """Get list of previously used test URLs."""
+    if os.path.exists(URL_HISTORY_FILE):
+        try:
+            with open(URL_HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
 
 @app.get("/tests")
 async def list_tests():

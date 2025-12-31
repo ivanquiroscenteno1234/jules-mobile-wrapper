@@ -16,18 +16,46 @@ class TestScreen extends StatefulWidget {
 class _TestScreenState extends State<TestScreen> {
   final _urlController = TextEditingController();
   final _objectiveController = TextEditingController();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
   
   bool _isRunning = false;
   String? _testId;
   Map<String, dynamic>? _testResult;
   Timer? _pollTimer;
+  List<String> _urlHistory = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUrlHistory();
+  }
 
   @override
   void dispose() {
     _urlController.dispose();
     _objectiveController.dispose();
+    _usernameController.dispose();
+    _passwordController.dispose();
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _fetchUrlHistory() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConfig.serverUrl}/test/urls'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as List;
+        setState(() {
+          _urlHistory = data.map((e) => e.toString()).toList();
+        });
+      }
+    } catch (e) {
+      print('Error fetching URL history: $e');
+    }
   }
 
   Future<void> _startTest() async {
@@ -53,6 +81,8 @@ class _TestScreenState extends State<TestScreen> {
         body: json.encode({
           'url': _urlController.text,
           'objective': _objectiveController.text,
+          'username': _usernameController.text.isNotEmpty ? _usernameController.text : null,
+          'password': _passwordController.text.isNotEmpty ? _passwordController.text : null,
         }),
       );
 
@@ -145,27 +175,6 @@ class _TestScreenState extends State<TestScreen> {
                     const SizedBox(height: 16),
                     const Divider(),
                     const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        showNotification(
-                          title: '🧪 System Test',
-                          body: 'Notifications are working! This will appear in your tray on a real phone.',
-                          payload: json.encode({
-                            'type': 'test',
-                            'message': 'This is a test notification'
-                          }),
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Test notification sent! Check your tray (or console if on web).')),
-                        );
-                      },
-                      icon: const Icon(Icons.notifications_active),
-                      label: const Text('Test Notification Tray'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[600],
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
                     if (kIsWeb) ...[
                       const SizedBox(height: 8),
                       Text(
@@ -185,17 +194,79 @@ class _TestScreenState extends State<TestScreen> {
             const SizedBox(height: 16),
             
             // URL Input
-            TextField(
-              controller: _urlController,
-              decoration: InputDecoration(
-                labelText: 'URL to Test',
-                hintText: 'https://example.com',
-                prefixIcon: const Icon(Icons.link),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+            // URL Input with Autocomplete
+            Autocomplete<String>(
+              optionsBuilder: (TextEditingValue textEditingValue) {
+                // Show all URLs when empty (on focus), or filter when typing
+                if (textEditingValue.text.isEmpty) {
+                  return _urlHistory;  // Show all suggestions on focus
+                }
+                return _urlHistory.where((String option) {
+                  return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                });
+              },
+              onSelected: (String selection) {
+                _urlController.text = selection;
+              },
+              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                // Sync internal controller with autocomplete controller
+                if (_urlController.text.isNotEmpty && controller.text.isEmpty) {
+                  controller.text = _urlController.text;
+                }
+                controller.addListener(() {
+                  _urlController.text = controller.text;
+                });
+                
+                return TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: InputDecoration(
+                    labelText: 'URL to Test',
+                    hintText: 'https://example.com',
+                    prefixIcon: const Icon(Icons.link),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  keyboardType: TextInputType.url,
+                );
+              },
+            ),
+            
+            const SizedBox(height: 16),
+
+            // Credentials Section
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _usernameController,
+                    decoration: InputDecoration(
+                      labelText: 'Username (Optional)',
+                      hintText: 'admin',
+                      prefixIcon: const Icon(Icons.person_outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              keyboardType: TextInputType.url,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: 'Password (Optional)',
+                      hintText: '••••••••',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             
             const SizedBox(height: 16),
@@ -334,20 +405,61 @@ class _TestScreenState extends State<TestScreen> {
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
-                title: Text(
-                  '${step['action']}${step['target'] != null ? ' → ${step['target']}' : ''}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (step['page_state'] != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          step['page_state'].toString(),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.deepPurple,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      // Show natural language description if available, otherwise show action
+                      step['description'] != null && step['description'].toString().isNotEmpty
+                          ? step['description'].toString()
+                          : '${step['action']}${step['target'] != null ? ' → ${step['target']}' : ''}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ],
                 ),
-                subtitle: Text(
-                  step['reasoning'] ?? '',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isDark ? Colors.white70 : Colors.grey[600],
-                  ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Show technical details if description exists
+                    if (step['description'] != null && step['description'].toString().isNotEmpty)
+                      Text(
+                        '${step['action']}${step['target'] != null ? ' → ${step['target']}' : ''}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          color: isDark ? Colors.white54 : Colors.grey,
+                        ),
+                      ),
+                    if (step['reasoning'] != null && step['reasoning'].toString().isNotEmpty)
+                      Text(
+                        step['reasoning'],
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[600],
+                        ),
+                      ),
+                  ],
                 ),
               ),
             );
