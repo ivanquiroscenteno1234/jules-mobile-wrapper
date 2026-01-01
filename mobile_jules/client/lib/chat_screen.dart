@@ -29,6 +29,8 @@ class ChatMessage {
   final bool? hasPatch;
   final String? sessionId;
   final List<Map<String, dynamic>>? artifacts;
+  final String? createdPrUrl; // URL of PR created via UI
+  final String? createdBranchUrl; // URL of branch created via UI
 
   ChatMessage({
     required this.id,
@@ -47,6 +49,8 @@ class ChatMessage {
     this.hasPatch,
     this.sessionId,
     this.artifacts,
+    this.createdPrUrl,
+    this.createdBranchUrl,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -76,6 +80,48 @@ class ChatMessage {
       type: 'user',
       originator: 'user',
       content: text,
+    );
+  }
+
+  ChatMessage copyWith({
+    String? id,
+    String? content,
+    String? originator,
+    String? timestamp,
+    String? type,
+    String? planId,
+    List<dynamic>? steps,
+    String? title,
+    String? description,
+    String? pullRequestUrl,
+    String? julesUrl,
+    String? repoName,
+    bool? isWaiting,
+    bool? hasPatch,
+    String? sessionId,
+    List<Map<String, dynamic>>? artifacts,
+    String? createdPrUrl,
+    String? createdBranchUrl,
+  }) {
+    return ChatMessage(
+      id: id ?? this.id,
+      content: content ?? this.content,
+      originator: originator ?? this.originator,
+      timestamp: timestamp ?? this.timestamp,
+      type: type ?? this.type,
+      planId: planId ?? this.planId,
+      steps: steps ?? this.steps,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      pullRequestUrl: pullRequestUrl ?? this.pullRequestUrl,
+      julesUrl: julesUrl ?? this.julesUrl,
+      repoName: repoName ?? this.repoName,
+      isWaiting: isWaiting ?? this.isWaiting,
+      hasPatch: hasPatch ?? this.hasPatch,
+      sessionId: sessionId ?? this.sessionId,
+      artifacts: artifacts ?? this.artifacts,
+      createdPrUrl: createdPrUrl ?? this.createdPrUrl,
+      createdBranchUrl: createdBranchUrl ?? this.createdBranchUrl,
     );
   }
 }
@@ -131,8 +177,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _isPublishing = false;
   String? _publishStatus; // 'success', 'error', or null
   String? _publishMessage; // Success/error message
-  String? _createdPrUrl; // URL of the created PR
-  String? _createdBranchUrl; // URL of the created branch
   
   // Branch selection
   List<String> _availableBranches = [];
@@ -513,7 +557,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _createGitHubPR(String sessionId, {bool branchOnly = false}) async {
+  Future<void> _createGitHubPR(String sessionId, String messageId, {bool branchOnly = false}) async {
     setState(() {
       _isPublishing = true;
       _publishStatus = null;
@@ -535,21 +579,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         
-        if (data['type'] == 'branch') {
-          // Branch only created
+        // Find the corresponding "completed" message and update it
+        final msgIndex = _messages.indexWhere((m) => m.id == messageId);
+        
+        if (msgIndex != -1) {
+          final oldMsg = _messages[msgIndex];
+          ChatMessage newMsg;
+          
+          if (data['type'] == 'branch') {
+            newMsg = oldMsg.copyWith(createdBranchUrl: data['branch_url']);
+          } else {
+            newMsg = oldMsg.copyWith(createdPrUrl: data['pr_url']);
+          }
+          
           setState(() {
+            _messages[msgIndex] = newMsg;
             _isPublishing = false;
             _publishStatus = 'success';
-            _publishMessage = 'Branch "${data['branch']}" created!';
-            _createdBranchUrl = data['branch_url'];
+            _publishMessage = (data['type'] == 'branch')
+                ? 'Branch "${data['branch']}" created!'
+                : 'PR #${data['pr_number']} created!';
           });
         } else {
-          // PR created
+          // Fallback for safety (though this should not happen)
           setState(() {
             _isPublishing = false;
-            _publishStatus = 'success';
-            _publishMessage = 'PR #${data['pr_number']} created!';
-            _createdPrUrl = data['pr_url'];
+            _publishStatus = 'error';
+            _publishMessage = 'Could not find the original message to update.';
           });
         }
       } else {
@@ -652,9 +708,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       // Build URL with optional pr_url parameter
       var url = '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/generate-test';
-      final effectivePrUrl = prUrl ?? _createdPrUrl;
-      if (effectivePrUrl != null) {
-        url += '?pr_url=${Uri.encodeComponent(effectivePrUrl)}';
+      if (prUrl != null) {
+        url += '?pr_url=${Uri.encodeComponent(prUrl)}';
       }
       
       final response = await http.post(
@@ -1519,9 +1574,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildCompletedBadge(ChatMessage message) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final prUrl = message.pullRequestUrl ?? _createdPrUrl;
+    // Prioritize the PR URL created via the UI, then the one from the server message.
+    final prUrl = message.createdPrUrl ?? message.pullRequestUrl;
+    final branchUrl = message.createdBranchUrl;
     final julesUrl = message.julesUrl;
     final hasPR = prUrl != null && prUrl.isNotEmpty;
+    final hasBranch = branchUrl != null && branchUrl.isNotEmpty;
     final hasPatch = message.hasPatch == true;
     final sessionId = message.sessionId;
     final prTitle = message.title ?? 'Task Completed';
@@ -1697,9 +1755,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 ],
-              ] else if (_createdBranchUrl != null) ...[                // Branch was created - show view button
+              ] else if (hasBranch) ...[ // Branch was created - show view button
                 ElevatedButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(_createdBranchUrl!), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(Uri.parse(branchUrl!), mode: LaunchMode.externalApplication),
                   icon: const Icon(Icons.open_in_new, size: 18),
                   label: const Text('View Branch on GitHub'),
                   style: ElevatedButton.styleFrom(
@@ -1799,7 +1857,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     // Create Branch Only button
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: _isPublishing ? null : () => _createGitHubPR(sessionId, branchOnly: true),
+                        onPressed: _isPublishing ? null : () => _createGitHubPR(sessionId, message.id, branchOnly: true),
                         icon: _isPublishing 
                             ? const SizedBox(
                                 width: 16, 
@@ -1821,7 +1879,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Expanded(
                       flex: 2,
                       child: ElevatedButton.icon(
-                        onPressed: _isPublishing ? null : () => _createGitHubPR(sessionId, branchOnly: false),
+                        onPressed: _isPublishing ? null : () => _createGitHubPR(sessionId, message.id, branchOnly: false),
                         icon: _isPublishing 
                             ? const SizedBox(
                                 width: 16, 
