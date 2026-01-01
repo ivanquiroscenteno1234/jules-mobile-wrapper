@@ -14,7 +14,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Import the Client
-from jules_client import JulesClient
+from jules_client import JulesClient, UPLOAD_DIR
 from notifications import notification_service, SessionPoller
 from tester_agent import tester_agent
 from github_client import get_github_client
@@ -43,9 +43,16 @@ else:
 # Session poller for notifications
 session_poller = SessionPoller(client, notification_service)
 
+def _init():
+    """Initialize server state, like creating directories."""
+    if not os.path.exists(UPLOAD_DIR):
+        os.makedirs(UPLOAD_DIR)
+        print(f"Created upload directory at: {UPLOAD_DIR}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the session polling background task."""
+    _init()
     asyncio.create_task(session_poller.start_polling(interval_seconds=30))
     print("Session Poller started.")
     yield
@@ -118,6 +125,28 @@ def save_credentials(data: Dict[str, List[Dict]]):
 
 # In-memory cache
 credentials_data: Dict[str, List[Dict]] = load_credentials()
+
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Handles image uploads, saves them, and returns a filename."""
+    # Basic validation for image content type
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an image.")
+        
+    try:
+        # Create a unique filename to avoid collisions and directory traversal
+        # Use a random UUID and keep the original file extension
+        file_ext = os.path.splitext(file.filename)[1]
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        filepath = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        # Save the file
+        with open(filepath, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        return {"filename": unique_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
 
 # Device registration model
 class DeviceRegistration(BaseModel):
@@ -849,6 +878,15 @@ async def _handle_websocket(
             # Wait for user message from phone
             data = await websocket.receive_text()
             
+            # Parse incoming message - could be plain text or JSON
+            try:
+                msg_data = json.loads(data)
+                text = msg_data.get("text", "")
+                image_filename = msg_data.get("image_filename")
+            except json.JSONDecodeError:
+                text = data
+                image_filename = None
+
             # If no session yet, create one with this message as the task
             if not active_session_id:
                 try:
@@ -860,10 +898,11 @@ async def _handle_websocket(
                     # Create session with user's message as the actual task
                     session_data = await client.create_session(
                         source_id=source_id, 
-                        prompt=data,  # User's first message becomes the task
-                        auto_mode=auto_mode
+                        prompt=text,  # User's first message becomes the task
+                        auto_mode=auto_mode,
+                        image_filename=image_filename
                     )
-                    print(f"DEBUG: Created session with task: {data[:50]}...")
+                    print(f"DEBUG: Created session with task: {text[:50]}...")
                     
                     # Extract session_id from response
                     active_session_id = session_data.get("name")
@@ -895,12 +934,12 @@ async def _handle_websocket(
                     
             else:
                 # Session already exists, handle commands or send messages
-                if data.startswith("/approve"):
+                if text.startswith("/approve"):
                     await client.approve_plan(active_session_id)
                     await websocket.send_json({"type": "system", "content": "Plan approved!"})
                 else:
-                    # Send regular message to Jules
-                    await client.send_message(active_session_id, data)
+                    # Send regular message to Jules, with optional image
+                    await client.send_message(active_session_id, text, image_filename=image_filename)
             # The poller will pick up the response
     except WebSocketDisconnect:
         print(f"Client disconnected")

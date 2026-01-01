@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 import 'main.dart' show showNotification;
@@ -29,6 +31,7 @@ class ChatMessage {
   final bool? hasPatch;
   final String? sessionId;
   final List<Map<String, dynamic>>? artifacts;
+  final String? imageUrl;
 
   ChatMessage({
     required this.id,
@@ -47,9 +50,29 @@ class ChatMessage {
     this.hasPatch,
     this.sessionId,
     this.artifacts,
+    this.imageUrl,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    // Safely parse artifacts
+    List<Map<String, dynamic>>? artifacts;
+    if (json['artifacts'] != null && json['artifacts'] is List) {
+      artifacts = List<Map<String, dynamic>>.from(
+        json['artifacts'].where((item) => item is Map<String, dynamic>)
+      );
+    }
+    
+    // Check for image URL in artifacts (from agent)
+    String? imageUrl = json['imageUrl'];
+    if (artifacts != null) {
+      for (var artifact in artifacts) {
+        if (artifact['type'] == 'media' && artifact['url'] != null) {
+          imageUrl = artifact['url'];
+          break;
+        }
+      }
+    }
+
     return ChatMessage(
       id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
       content: json['content'] ?? json['message'] ?? '',
@@ -66,16 +89,18 @@ class ChatMessage {
       isWaiting: json['isWaiting'],
       hasPatch: json['hasPatch'],
       sessionId: json['sessionId'],
-      artifacts: json['artifacts'] != null ? List<Map<String, dynamic>>.from(json['artifacts']) : null,
+      artifacts: artifacts,
+      imageUrl: imageUrl,
     );
   }
 
-  factory ChatMessage.user(String text) {
+  factory ChatMessage.user(String text, {String? imageUrl}) {
     return ChatMessage(
       id: 'user_${DateTime.now().millisecondsSinceEpoch}',
       type: 'user',
       originator: 'user',
       content: text,
+      imageUrl: imageUrl,
     );
   }
 }
@@ -146,6 +171,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   bool _isTranscribing = false;
+
+  // Image attachment
+  File? _imageFile;
+  final ImagePicker _picker = ImagePicker();
+  bool _isUploading = false;
 
   // UX Improvements
   String? _currentProgressTitle;
@@ -442,23 +472,92 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _sendMessage() {
     if (_controller.text.isNotEmpty && _isConnected) {
-      _sendMessageText(_controller.text);
+      // If there's an image, upload it first, then send the message.
+      // Otherwise, just send the text message.
+      if (_imageFile != null) {
+        _uploadAndSendMessage(_controller.text, _imageFile!);
+      } else {
+        _sendMessageText(_controller.text);
+      }
       _controller.clear();
     }
   }
   
-  void _sendMessageText(String text) {
-    if (text.isNotEmpty && _isConnected) {
+  void _sendMessageText(String text, {String? imageFilename, String? localImagePath}) {
+    if ((text.isNotEmpty || imageFilename != null) && _isConnected) {
       setState(() {
-        _messages.add(ChatMessage.user(text));
+        _messages.add(ChatMessage.user(text, imageUrl: localImagePath));
         _isWaiting = true;
       });
       
-      _channel.sink.add(text);
+      // Send as JSON
+      final messagePayload = {
+        'text': text,
+        'image_filename': imageFilename,
+      };
+      _channel.sink.add(jsonEncode(messagePayload));
       _scrollToBottom();
     }
   }
 
+  Future<void> _pickImage() async {
+    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        _imageFile = File(pickedFile.path);
+      });
+    }
+  }
+
+  Future<void> _uploadAndSendMessage(String text, File imageFile) async {
+    setState(() {
+      _isUploading = true;
+      // Add a temporary message to show the image locally while uploading
+      _messages.add(ChatMessage.user(text, imageUrl: imageFile.path));
+      _scrollToBottom();
+    });
+
+    try {
+      var request = http.MultipartRequest('POST', Uri.parse('${AppConfig.serverUrl}/upload-image'));
+      request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+      
+      var response = await request.send();
+      
+      if (response.statusCode == 200) {
+        final respStr = await response.stream.bytesToString();
+        final data = jsonDecode(respStr);
+        final filename = data['filename'];
+        
+        // Once uploaded, remove the temporary message and send the real one with the server filename
+        setState(() {
+          _messages.removeLast();
+        });
+
+        _sendMessageText(text, imageFilename: filename, localImagePath: imageFile.path);
+
+      } else {
+        throw Exception('Failed to upload image');
+      }
+    } catch (e) {
+      // Handle error
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error uploading image: $e'))
+        );
+      }
+      // Remove the temporary message on failure
+      setState(() {
+        _messages.removeLast();
+      });
+    } finally {
+      setState(() {
+        _isUploading = false;
+        _imageFile = null; // Clear the image after sending
+      });
+    }
+  }
+  
   void _approvePlan() {
     if (_isConnected) {
       _channel.sink.add('/approve');
@@ -1056,10 +1155,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            if (_imageFile != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 8),
+              child: Stack(
+                alignment: Alignment.topRight,
+                children: [
+                  Container(
+                    height: 100,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      image: DecorationImage(
+                        image: FileImage(_imageFile!),
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                    onPressed: () {
+                      setState(() {
+                        _imageFile = null;
+                      });
+                    },
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black.withOpacity(0.5),
+                      padding: const EdgeInsets.all(4),
+                    ),
+                  )
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: const Icon(Icons.attach_file),
+                  onPressed: _pickImage,
+                  tooltip: 'Attach Image',
+                ),
                 IconButton(
                   icon: _isRecording 
                       ? const Icon(Icons.stop, color: Colors.red) 
@@ -1091,7 +1226,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 IconButton(
                   icon: const Icon(Icons.send),
                   color: Colors.deepPurple,
-                  onPressed: _isWaiting ? null : _sendMessage,
+                  onPressed: (_isWaiting || _isUploading) ? null : _sendMessage,
                 ),
               ],
             ),
@@ -1906,7 +2041,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? Colors.deepPurple[700] : Colors.deepPurple[100],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (msg.imageUrl != null && msg.imageUrl!.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: Image.file(
+                  File(msg.imageUrl!),
+                  height: 150,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            if (msg.content.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: msg.imageUrl != null ? 8.0 : 0),
+                child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1931,6 +2085,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildJulesBubble(ChatMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool hasImage = msg.imageUrl != null && msg.imageUrl!.isNotEmpty;
+    
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
@@ -1943,10 +2099,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(
-          msg.content,
-          style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
-          softWrap: true,  // Allow text to wrap to multiple lines
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasImage)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                // Note: Agent images are network URLs
+                child: Image.network(
+                  '${AppConfig.serverUrl}/${msg.imageUrl!}',
+                  height: 150,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  // Optional: Add loading and error widgets for better UX
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return const Center(child: CircularProgressIndicator());
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Icon(Icons.broken_image, size: 40);
+                  },
+                ),
+              ),
+            if (msg.content.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: hasImage ? 8.0 : 0),
+                child: Text(
+                  msg.content,
+                  style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
+                  softWrap: true,
+                ),
+              ),
+          ],
         ),
       ),
     );

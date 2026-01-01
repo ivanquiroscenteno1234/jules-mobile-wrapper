@@ -2,6 +2,10 @@ import os
 import httpx
 import asyncio
 from typing import List, Dict, Optional
+import base64
+
+# Define the upload directory at the module level for reuse
+UPLOAD_DIR = "uploads"
 
 class JulesClient:
     def __init__(self, api_key: str):
@@ -11,6 +15,40 @@ class JulesClient:
             "X-Goog-Api-Key": self.api_key,
             "Content-Type": "application/json"
         }
+
+    def _prepare_visual_contexts(self, image_filename: str) -> Optional[List[Dict]]:
+        """Reads an image, base64 encodes it, and prepares the visualContexts payload."""
+        if not image_filename:
+            return None
+        
+        try:
+            # Prevent directory traversal attacks
+            safe_filename = os.path.basename(image_filename)
+            filepath = os.path.join(UPLOAD_DIR, safe_filename)
+            
+            if not os.path.exists(filepath):
+                print(f"ERROR: Image file not found at {filepath}")
+                return None
+
+            with open(filepath, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            # Determine MIME type from extension
+            mime_type = "image/jpeg"
+            if safe_filename.lower().endswith(".png"):
+                mime_type = "image/png"
+            elif safe_filename.lower().endswith(".webp"):
+                mime_type = "image/webp"
+
+            return [{
+                "media": {
+                    "data": encoded_string,
+                    "mimeType": mime_type
+                }
+            }]
+        except Exception as e:
+            print(f"Error preparing visual context: {e}")
+            return None
 
     async def list_sources(self) -> List[Dict]:
         """Lists available sources (GitHub repos)."""
@@ -41,7 +79,8 @@ class JulesClient:
         prompt: str = "Start session",
         auto_mode: bool = False,
         starting_branch: str = None,
-        title: str = None
+        title: str = None,
+        image_filename: Optional[str] = None
     ) -> Dict:
         """Creates a new chat session.
         
@@ -51,6 +90,7 @@ class JulesClient:
             auto_mode: If True, auto-approve plans and auto-create PRs (only for repo sessions)
             starting_branch: Optional branch to start from (only for repo sessions)
             title: Optional title for the session
+            image_filename: Optional filename of an image to include in the initial prompt.
         """
         payload = {
             "prompt": prompt,
@@ -71,8 +111,13 @@ class JulesClient:
             if auto_mode:
                 payload["automationMode"] = "AUTO_CREATE_PR"
                 payload["requirePlanApproval"] = False
-        # For repoless sessions, omit sourceContext entirely
-            
+        
+        # Add visual context if image is provided
+        if image_filename:
+            visual_contexts = self._prepare_visual_contexts(image_filename)
+            if visual_contexts:
+                payload["visualContexts"] = visual_contexts
+        
         print(f"DEBUG create_session payload: {payload}", flush=True)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -85,14 +130,18 @@ class JulesClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def send_message(self, session_id: str, message: str):
+    async def send_message(self, session_id: str, message: str, image_filename: Optional[str] = None):
         """Sends a user message to an existing session."""
-        # Note: session_id usually comes in full form "sessions/123..."
-        # If the API expects just the ID, we might need to parse it, 
-        # but the docs show using the full resource name in the URL.
         url = f"{self.base_url}/{session_id}:sendMessage"
         
         payload = {"prompt": message}
+        
+        # Add visual context if image is provided
+        if image_filename:
+            visual_contexts = self._prepare_visual_contexts(image_filename)
+            if visual_contexts:
+                payload["visualContexts"] = visual_contexts
+
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
@@ -100,8 +149,6 @@ class JulesClient:
                 json=payload
             )
             resp.raise_for_status()
-            # The response is usually empty or the updated session object; 
-            # we rely on list_activities to get the actual answer.
             return resp.json()
 
     async def get_session(self, session_id: str) -> Dict:
