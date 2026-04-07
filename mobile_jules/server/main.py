@@ -1709,8 +1709,13 @@ async def speech_to_text(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server")
     
     try:
-        # Save temporary file
-        temp_filename = f"temp_{uuid.uuid4()}.{file.filename.split('.')[-1]}"
+        # Save temporary file safely
+        ext = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'raw'
+        safe_ext = ''.join(c for c in ext if c.isalnum())
+        if not safe_ext:
+            safe_ext = "audio"
+        temp_filename = f"temp_{uuid.uuid4()}.{safe_ext}"
+
         with open(temp_filename, "wb") as buffer:
             buffer.write(await file.read())
         
