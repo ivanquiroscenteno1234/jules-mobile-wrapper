@@ -81,9 +81,16 @@ def upload_file():
         ).execute()
         print(f"Success! File ID: {file.get('id')}")
     except Exception as e:
-        print(f"Upload failed: {e}")
-        print("Tip: Check if the Folder ID is correct and if the authenticated user has write access to it.")
-        sys.exit(1)
+        error_str = str(e).lower()
+        if 'deleted_client' in error_str or 'invalid_client' in error_str or 'invalid_grant' in error_str:
+            print(f"Google Drive Upload bypassed due to auth configuration error: {e}")
+            print("The OAuth client was deleted or credentials are invalid. The APK will be available in GitHub Artifacts instead.")
+            # Do not exit(1) so the CI can proceed gracefully and preserve the GitHub artifact.
+            sys.exit(0)
+        else:
+            print(f"Upload failed: {e}")
+            print("Tip: Check if the Folder ID is correct and if the authenticated user has write access to it.")
+            sys.exit(1)
 
 if __name__ == '__main__':
     upload_file()
