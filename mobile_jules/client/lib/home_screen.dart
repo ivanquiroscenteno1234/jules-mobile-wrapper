@@ -107,6 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: Icon(_isSearching ? Icons.close : Icons.search),
+            tooltip: _isSearching ? 'Close Search' : 'Search Repositories',
             onPressed: () {
               setState(() {
                 _isSearching = !_isSearching;
@@ -167,10 +168,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             IconButton(
               icon: const Icon(Icons.settings),
+              tooltip: 'Settings',
               onPressed: _showSettingsDialog,
             ),
             IconButton(
               icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh Repositories',
               onPressed: () {
                 setState(() {
                   isLoading = true;
@@ -272,12 +275,33 @@ class _HomeScreenState extends State<HomeScreen> {
                     
                     // Repos List
                     Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 80, top: 8),
-                        itemCount: _filteredRepos.length,
-                        itemBuilder: (context, index) {
-                          final repo = _filteredRepos[index];
-                          return Padding(
+                      child: _filteredRepos.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.folder_off, size: 64, color: Colors.grey[400]),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _isSearching ? 'No repositories match your search' : 'No repositories found',
+                                  style: TextStyle(color: Colors.grey[600], fontSize: 16),
+                                ),
+                                if (!_isSearching) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Create a new task to get started',
+                                    style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(bottom: 80, top: 8),
+                            itemCount: _filteredRepos.length,
+                            itemBuilder: (context, index) {
+                              final repo = _filteredRepos[index];
+                              return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                             child: _buildGlassCard(
                               child: ListTile(
@@ -308,13 +332,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                         sourceId: repo['id'],
                                       ),
                                     ),
-                                  );
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                     ),
                   ],
                 ),
