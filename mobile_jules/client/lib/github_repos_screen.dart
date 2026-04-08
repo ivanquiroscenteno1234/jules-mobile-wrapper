@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -19,6 +20,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
   String? _error;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
 
   @override
   void initState() {
@@ -30,6 +32,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
   @override
   void dispose() {
     print('[GitHubReposScreen] Disposing state.');
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -171,6 +174,13 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
     }
   }
 
+  void _onSearchChanged(String query) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _filterRepos(query);
+    });
+  }
+
   void _filterRepos(String query) {
     print('[GitHubReposScreen] Filtering repositories with query: "$query"');
     if (query.isEmpty) {
@@ -178,11 +188,12 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
         _filteredRepos = _repos;
       });
     } else {
+      final lowercaseQuery = query.toLowerCase();
       setState(() {
         _filteredRepos = _repos
             .where((repo) =>
-                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
-                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
+                (repo['name'] as String).toLowerCase().contains(lowercaseQuery) ||
+                (repo['full_name'] as String).toLowerCase().contains(lowercaseQuery))
             .toList();
       });
     }
@@ -200,7 +211,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
                   hintText: 'Search repositories...',
                   border: InputBorder.none,
                 ),
-                onChanged: _filterRepos,
+                onChanged: _onSearchChanged,
               )
             : const Text('GitHub Repositories'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,

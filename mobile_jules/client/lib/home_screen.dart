@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -23,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? error;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -63,17 +66,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _onSearchChanged(String query) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _filterRepos(query);
+    });
+  }
+
   void _filterRepos(String query) {
     if (query.isEmpty) {
       setState(() {
         _filteredRepos = repos;
       });
     } else {
+      final lowercaseQuery = query.toLowerCase();
       setState(() {
         _filteredRepos = repos
             .where((repo) =>
-                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
-                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
+                (repo['name'] as String).toLowerCase().contains(lowercaseQuery) ||
+                (repo['full_name'] as String).toLowerCase().contains(lowercaseQuery))
             .toList();
       });
     }
@@ -96,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     hintStyle: TextStyle(color: Colors.black54),
                   ),
                   style: const TextStyle(color: Colors.black87),
-                  onChanged: _filterRepos,
+                  onChanged: _onSearchChanged,
                 )
               : const Text(
                   'Mobile Jules',
