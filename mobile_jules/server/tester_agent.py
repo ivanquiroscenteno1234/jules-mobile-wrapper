@@ -195,13 +195,19 @@ class TesterAgent:
                 # Remove any trailing quotes or extra characters
                 path = path.strip('"').strip("'")
                 
-                # Read the file and encode to base64
-                import os
-                if os.path.exists(path):
-                    with open(path, "rb") as f:
-                        return base64.b64encode(f.read()).decode()
+                # Read the file and encode to base64 using a separate thread to avoid blocking the event loop
+                def _read_file():
+                    import os
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            return base64.b64encode(f.read()).decode()
+                    return None
+
+                result_b64 = await asyncio.to_thread(_read_file)
+                if result_b64:
+                    return result_b64
                 else:
-                    print(f"⚠️ Screenshot file not found: {path}")
+                    print(f"⚠️ Screenshot file not found or empty: {path}")
                     return ""
             else:
                 # Maybe it's already base64 or some other format
