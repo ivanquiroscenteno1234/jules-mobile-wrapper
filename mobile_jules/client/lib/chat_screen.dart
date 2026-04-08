@@ -1090,6 +1090,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 const SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.send),
+                  tooltip: 'Send message',
                   color: Colors.deepPurple,
                   onPressed: _isWaiting ? null : _sendMessage,
                 ),
@@ -1391,6 +1392,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white),
+                    tooltip: 'Close diff',
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -1779,6 +1781,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ),
                       IconButton(
                         icon: Icon(_isLoadingBranches ? Icons.hourglass_empty : Icons.refresh, size: 18),
+                        tooltip: 'Refresh branches',
                         onPressed: _isLoadingBranches ? null : () {
                           if (message.repoName != null) {
                             final parts = message.repoName!.split('/');

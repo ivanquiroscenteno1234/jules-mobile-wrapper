@@ -100,6 +100,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh dashboard',
             onPressed: fetchDashboardData,
           ),
         ],
