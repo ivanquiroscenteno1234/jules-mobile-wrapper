@@ -6,6 +6,7 @@ import json
 import asyncio
 import uuid
 from typing import List, Dict, Optional
+from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 import google.generativeai as genai
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
@@ -1485,6 +1486,14 @@ def save_url_to_history(url: str):
 @app.post("/test/start")
 async def start_test(request: TestRequest):
     """Start a new test with the Tester Agent."""
+    # Validate URL to prevent SSRF and local file access
+    parsed = urlparse(request.url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL scheme. Only HTTP and HTTPS are allowed for security reasons."
+        )
+
     # Start MCP server if not running
     start_mcp_server()
     
