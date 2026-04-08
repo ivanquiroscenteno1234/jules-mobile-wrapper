@@ -117,37 +117,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Stats Grid
-                        GridView.count(
-                          crossAxisCount: 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 1.5,
+                        // Using Column and Rows instead of GridView with shrinkWrap to avoid layout rounding bugs
+                        Column(
                           children: [
-                            _buildStatCard(
-                              'Active',
-                              activeSessions.toString(),
-                              Icons.code,
-                              Colors.orange,
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: AspectRatio(
+                                    aspectRatio: 1.5,
+                                    child: _buildStatCard(
+                                      'Active',
+                                      activeSessions.toString(),
+                                      Icons.code,
+                                      Colors.orange,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: AspectRatio(
+                                    aspectRatio: 1.5,
+                                    child: _buildStatCard(
+                                      'Waiting',
+                                      waitingSessions.toString(),
+                                      Icons.pending_actions,
+                                      Colors.amber,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            _buildStatCard(
-                              'Waiting',
-                              waitingSessions.toString(),
-                              Icons.pending_actions,
-                              Colors.amber,
-                            ),
-                            _buildStatCard(
-                              'Completed',
-                              completedSessions.toString(),
-                              Icons.check_circle,
-                              Colors.green,
-                            ),
-                            _buildStatCard(
-                              'PRs Created',
-                              sessionsWithPRs.toString(),
-                              Icons.merge,
-                              Colors.purple,
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: AspectRatio(
+                                    aspectRatio: 1.5,
+                                    child: _buildStatCard(
+                                      'Completed',
+                                      completedSessions.toString(),
+                                      Icons.check_circle,
+                                      Colors.green,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: AspectRatio(
+                                    aspectRatio: 1.5,
+                                    child: _buildStatCard(
+                                      'PRs Created',
+                                      sessionsWithPRs.toString(),
+                                      Icons.merge,
+                                      Colors.purple,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
