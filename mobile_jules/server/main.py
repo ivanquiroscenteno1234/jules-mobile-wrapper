@@ -50,10 +50,21 @@ async def lifespan(app: FastAPI):
     print("Session Poller started.")
     yield
 
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS")
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+else:
+    allowed_origins = [
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
