@@ -40,32 +40,29 @@ android {
         versionName = flutter.versionName
     }
 
-    signingConfigs {
-        create("release") {
-            val keyAliasProp = keystoreProperties.getProperty("keyAlias")
-            val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
-            val storeFileProp = keystoreProperties.getProperty("storeFile")
-            val storePasswordProp = keystoreProperties.getProperty("storePassword")
+    val keyAliasProp = keystoreProperties.getProperty("keyAlias")
+    val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
+    val storeFileProp = keystoreProperties.getProperty("storeFile")
+    val storePasswordProp = keystoreProperties.getProperty("storePassword")
 
-            if (keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null) {
+    val hasValidSigning = keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null
+
+    if (hasValidSigning) {
+        signingConfigs {
+            create("release") {
                 keyAlias = keyAliasProp
                 keyPassword = keyPasswordProp
-                storeFile = rootProject.file(storeFileProp)
+                storeFile = rootProject.file(storeFileProp!!)
                 storePassword = storePasswordProp
-            } else {
-                // Fallback to debug signing if properties are missing
-                val debugSigningConfig = getByName("debug")
-                keyAlias = debugSigningConfig.keyAlias
-                keyPassword = debugSigningConfig.keyPassword
-                storeFile = debugSigningConfig.storeFile
-                storePassword = debugSigningConfig.storePassword
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasValidSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
