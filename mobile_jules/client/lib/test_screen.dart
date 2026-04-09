@@ -668,6 +668,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           children: [
             IconButton(
               icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back',
               onPressed: () => setState(() {
                 if (!_isRunning) _testResult = null;
               }),
@@ -802,6 +803,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back',
                 onPressed: () => setState(() => _selectedHistoryTest = null),
               ),
               const Text('Test Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),

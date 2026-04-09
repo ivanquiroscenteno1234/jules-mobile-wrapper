@@ -122,6 +122,7 @@ class _CredsScreenState extends State<CredsScreen> {
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(obscurePassword ? Icons.visibility : Icons.visibility_off),
+                      tooltip: obscurePassword ? 'Show Password' : 'Hide Password',
                       onPressed: () => setDialogState(() => obscurePassword = !obscurePassword),
                     ),
                   ),

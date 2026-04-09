@@ -207,6 +207,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
         actions: [
           IconButton(
             icon: Icon(_isSearching ? Icons.close : Icons.search),
+            tooltip: _isSearching ? 'Close Search' : 'Search Repositories',
             onPressed: () {
               setState(() {
                 _isSearching = !_isSearching;
@@ -219,6 +220,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh Repositories',
             onPressed: _loadRepos,
           ),
         ],
@@ -309,6 +311,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
                                 ),
                                 trailing: IconButton(
                                   icon: const Icon(Icons.open_in_new),
+                                  tooltip: 'Open in GitHub',
                                   onPressed: () => _openRepo(repo),
                                 ),
                                 onTap: () => _openRepo(repo),
