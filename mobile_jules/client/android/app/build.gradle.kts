@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -6,7 +8,7 @@ plugins {
 }
 
 val keystorePropertiesFile = rootProject.projectDir.resolve("key.properties")
-val keystoreProperties = java.util.Properties()
+val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
@@ -39,17 +41,30 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-            keyPassword = keystoreProperties.getProperty("keyPassword")
-            storeFile = keystoreProperties.getProperty("storeFile")?.let { rootProject.file(it) }
-            storePassword = keystoreProperties.getProperty("storePassword")
+        val keyAliasProp = keystoreProperties.getProperty("keyAlias")
+        val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
+        val storeFileProp = keystoreProperties.getProperty("storeFile")
+        val storePasswordProp = keystoreProperties.getProperty("storePassword")
+        if (keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null) {
+            create("release") {
+                keyAlias = keyAliasProp
+                keyPassword = keyPasswordProp
+                storeFile = rootProject.file(storeFileProp)
+                storePassword = storePasswordProp
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            val keyAliasProp = keystoreProperties.getProperty("keyAlias")
+            val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
+            val storeFileProp = keystoreProperties.getProperty("storeFile")
+            val storePasswordProp = keystoreProperties.getProperty("storePassword")
+
+            if (keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

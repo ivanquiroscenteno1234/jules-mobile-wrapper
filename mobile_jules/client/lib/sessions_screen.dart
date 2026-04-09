@@ -326,6 +326,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh sessions',
             onPressed: fetchSessions,
           ),
         ],
