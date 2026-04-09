@@ -1,0 +1,3 @@
+## 2025-02-24 - [Flutter List Filtering Performance]
+**Learning:** In Flutter apps rendering lists, un-debounced search inputs combined with multiple string computations (`toLowerCase()`) inside `.where()` iteration loops cause noticeable UI jank and frame drops due to repeated, synchronous execution blocking the main thread during rapid user input.
+**Action:** Always wrap text-based search filters in a debounce timer (e.g., 300ms using `Timer` from `dart:async`), and pre-compute invariants (like `query.toLowerCase()`) outside the iteration loop before updating state.

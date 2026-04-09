@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -19,6 +20,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
   String? _error;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -30,6 +32,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
   @override
   void dispose() {
     print('[GitHubReposScreen] Disposing state.');
+    _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -173,19 +176,24 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
 
   void _filterRepos(String query) {
     print('[GitHubReposScreen] Filtering repositories with query: "$query"');
-    if (query.isEmpty) {
-      setState(() {
-        _filteredRepos = _repos;
-      });
-    } else {
-      setState(() {
-        _filteredRepos = _repos
-            .where((repo) =>
-                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
-                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
-            .toList();
-      });
-    }
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (query.isEmpty) {
+        setState(() {
+          _filteredRepos = _repos;
+        });
+      } else {
+        // Optimize by pre-computing lower case query to avoid repeated calculations in the loop
+        final lowerQuery = query.toLowerCase();
+        setState(() {
+          _filteredRepos = _repos
+              .where((repo) =>
+                  repo['name'].toLowerCase().contains(lowerQuery) ||
+                  repo['full_name'].toLowerCase().contains(lowerQuery))
+              .toList();
+        });
+      }
+    });
   }
 
   @override

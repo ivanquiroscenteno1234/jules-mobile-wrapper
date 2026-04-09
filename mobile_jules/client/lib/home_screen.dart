@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -23,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? error;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -64,19 +67,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _filterRepos(String query) {
-    if (query.isEmpty) {
-      setState(() {
-        _filteredRepos = repos;
-      });
-    } else {
-      setState(() {
-        _filteredRepos = repos
-            .where((repo) =>
-                repo['name'].toLowerCase().contains(query.toLowerCase()) ||
-                repo['full_name'].toLowerCase().contains(query.toLowerCase()))
-            .toList();
-      });
-    }
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (query.isEmpty) {
+        setState(() {
+          _filteredRepos = repos;
+        });
+      } else {
+        // Optimize by pre-computing lower case query to avoid repeated calculations in the loop
+        final lowerQuery = query.toLowerCase();
+        setState(() {
+          _filteredRepos = repos
+              .where((repo) =>
+                  repo['name'].toLowerCase().contains(lowerQuery) ||
+                  repo['full_name'].toLowerCase().contains(lowerQuery))
+              .toList();
+        });
+      }
+    });
   }
 
   @override
