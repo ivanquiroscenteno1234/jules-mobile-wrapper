@@ -1485,6 +1485,12 @@ def save_url_to_history(url: str):
 @app.post("/test/start")
 async def start_test(request: TestRequest):
     """Start a new test with the Tester Agent."""
+    # Prevent SSRF/local file access
+    import urllib.parse
+    parsed_url = urllib.parse.urlparse(request.url)
+    if parsed_url.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme. Only http and https are allowed.")
+
     # Start MCP server if not running
     start_mcp_server()
     
