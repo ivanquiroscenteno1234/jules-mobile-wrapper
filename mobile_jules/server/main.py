@@ -5,9 +5,13 @@ import os
 import json
 import asyncio
 import uuid
+import re
 from typing import List, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 import google.generativeai as genai
+
+# Compile regular expression to efficiently parse updated files from git diffs
+DIFF_FILE_PATTERN = re.compile(r"^\+\+\+ (?:b/)?([^\t\n].*)", re.MULTILINE)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -1273,16 +1277,13 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                 unidiff = git_patch.get("unidiffPatch", "")
                 
                 # First, parse files from the cumulative diff (for resolving simple filenames)
-                diff_files = []
-                for line in unidiff.split("\n"):
-                    if line.startswith("+++ b/"):
-                        path = line[6:].strip()
-                        if path and path != "/dev/null" and path not in diff_files:
-                            diff_files.append(path)
-                    elif line.startswith("+++ ") and not line.startswith("+++\t"):
-                        path = line[4:].strip()
-                        if path and path != "/dev/null" and path not in diff_files:
-                            diff_files.append(path)
+                # Using a dict to preserve insertion order while providing O(1) lookups and avoiding O(N^2) behavior
+                diff_files_dict = {}
+                for match in DIFF_FILE_PATTERN.finditer(unidiff):
+                    path = match.group(1).strip()
+                    if path and path != "/dev/null":
+                        diff_files_dict[path] = None
+                diff_files = list(diff_files_dict.keys())
                 
                 # Get the message text to extract mentioned files
                 message_text = result.get("content", "")
