@@ -450,8 +450,11 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             if (textEditingValue.text.isEmpty) {
               return _urlHistory;
             }
+            // ⚡ Bolt: Pre-compute lowercase query outside the filter loop to prevent
+            // O(N) redundant string allocations, reducing UI thread blockage during typing.
+            final query = textEditingValue.text.toLowerCase();
             return _urlHistory.where((String option) {
-              return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+              return option.toLowerCase().contains(query);
             });
           },
           onSelected: (String selection) {
