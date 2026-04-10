@@ -46,7 +46,25 @@ class DummyBaseModel:
 
 mock_pydantic.BaseModel = DummyBaseModel
 
-from mobile_jules.server.main import decrypt_password
+from mobile_jules.server.main import decrypt_password, encrypt_password
+
+def test_encrypt_password_empty_password():
+    assert encrypt_password("") == ""
+    assert encrypt_password(None) is None
+
+@patch("mobile_jules.server.main.cipher_suite", None)
+def test_encrypt_password_no_cipher_suite():
+    password = "some_password"
+    assert encrypt_password(password) == password
+
+def test_encrypt_password_success():
+    mock_cipher = MagicMock()
+    mock_cipher.encrypt.return_value = b"encrypted_password"
+
+    with patch("mobile_jules.server.main.cipher_suite", mock_cipher):
+        result = encrypt_password("plain_text_password")
+        assert result == "encrypted_password"
+        mock_cipher.encrypt.assert_called_once_with(b"plain_text_password")
 
 def test_decrypt_password_empty_token():
     assert decrypt_password("") == ""
