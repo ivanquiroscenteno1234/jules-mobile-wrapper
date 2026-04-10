@@ -55,15 +55,26 @@ async def lifespan(app: FastAPI):
     yield
 
 allowed_origins_env = os.environ.get("ALLOWED_ORIGINS")
+safe_defaults = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 if allowed_origins_env:
-    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
-else:
+    # Parse origins and explicitly filter out the dangerous "*" wildcard
     allowed_origins = [
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
+        origin.strip()
+        for origin in allowed_origins_env.split(",")
+        if origin.strip() and origin.strip() != "*"
     ]
+    # Fallback to safe defaults if the environment variable was just "*" or empty
+    if not allowed_origins:
+        print("WARNING: ALLOWED_ORIGINS only contained wildcards or was empty. Falling back to safe defaults.")
+        allowed_origins = safe_defaults
+else:
+    allowed_origins = safe_defaults
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
