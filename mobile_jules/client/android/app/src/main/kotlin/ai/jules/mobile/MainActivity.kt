@@ -1,4 +1,4 @@
-package com.example.mobile_jules_client
+package ai.jules.mobile
 
 import io.flutter.embedding.android.FlutterActivity
 
