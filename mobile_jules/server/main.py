@@ -171,8 +171,11 @@ async def list_repos():
                 id=s["name"] # Use the full resource name as ID
             ))
         return repos
+    except HTTPException:
+        raise
     except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/sessions")
 async def list_sessions():
@@ -180,8 +183,11 @@ async def list_sessions():
     try:
         sessions = await client.list_sessions()
         return {"sessions": sessions}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/sessions/{session_id:path}")
 async def get_session(session_id: str):
@@ -203,8 +209,11 @@ async def get_session(session_id: str):
         
         session["pullRequests"] = prs
         return session
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.post("/sessions/{session_id:path}/approve")
 async def approve_plan(session_id: str):
@@ -212,8 +221,11 @@ async def approve_plan(session_id: str):
     try:
         result = await client.approve_plan(session_id)
         return {"success": True, "result": result}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.delete("/sessions/{session_id:path}")
 async def delete_session(session_id: str):
@@ -225,9 +237,11 @@ async def delete_session(session_id: str):
         if full_session_id in completed_session_data:
             del completed_session_data[full_session_id]
         return {"success": True, "message": "Session deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"DEBUG delete_session exception: {e}", flush=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.post("/sessions/{session_id:path}/publish")
 async def publish_branch(session_id: str, create_pr: bool = Query(False)):
@@ -240,8 +254,11 @@ async def publish_branch(session_id: str, create_pr: bool = Query(False)):
     try:
         result = await client.submit_branch(session_id, create_pr=create_pr)
         return {"success": True, "result": result}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/sessions/{session_id}/patch")
 async def get_session_patch(session_id: str):
@@ -443,7 +460,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
         raise
     except Exception as e:
         print(f"Test generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Test generation failed due to an internal error.")
 
 # ===== Credentials Management Endpoints =====
 
@@ -537,8 +554,11 @@ async def list_repo_branches(owner: str, repo: str):
     try:
         branches = await github_client.list_branches(owner, repo)
         return {"branches": branches}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 # ===== GitHub Repo Management Endpoints =====
@@ -577,8 +597,11 @@ async def create_github_repo(request: CreateRepoRequest):
         if e.response.status_code == 422:
             raise HTTPException(status_code=422, detail="Repository name already exists or is invalid")
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/github/repos")
 async def list_github_repos():
@@ -593,8 +616,11 @@ async def list_github_repos():
     try:
         repos = await github_client.list_user_repos(per_page=50)
         return {"repos": repos}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.delete("/github/repos/{owner}/{repo}")
 async def delete_github_repo(owner: str, repo: str):
@@ -612,8 +638,11 @@ async def delete_github_repo(owner: str, repo: str):
             return {"success": True, "message": f"Repository {owner}/{repo} deleted"}
         else:
             raise HTTPException(status_code=404, detail="Repository not found or permission denied")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 @app.post("/sessions/{session_id:path}/github-pr")
@@ -694,8 +723,11 @@ async def create_github_pr(
             branch_only=branch_only,
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 # Repoless WebSocket endpoint - no source_id required
@@ -1763,11 +1795,13 @@ async def speech_to_text(file: UploadFile = File(...)):
         
         return {"text": response.text.strip()}
     
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"STT Error: {e}")
         if 'temp_filename' in locals() and os.path.exists(temp_filename):
             os.remove(temp_filename)
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Transcription failed due to an internal error.")
 
 if __name__ == "__main__":
     # Attempt to start ngrok for easier mobile testing
