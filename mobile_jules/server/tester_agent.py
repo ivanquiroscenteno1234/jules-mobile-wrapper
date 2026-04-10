@@ -195,15 +195,18 @@ class TesterAgent:
                 # Remove any trailing quotes or extra characters
                 path = path.strip('"').strip("'")
                 
-                # Read the file and encode to base64 using a separate thread to avoid blocking the event loop
-                def _read_file():
+                # Read the file and encode to base64 asynchronously
+                async def _read_file_async():
                     import os
+                    import aiofiles
                     if os.path.exists(path):
-                        with open(path, "rb") as f:
-                            return base64.b64encode(f.read()).decode()
+                        async with aiofiles.open(path, "rb") as f:
+                            content = await f.read()
+                            # Offload CPU-bound base64 encoding to thread
+                            return await asyncio.to_thread(lambda c: base64.b64encode(c).decode(), content)
                     return None
 
-                result_b64 = await asyncio.to_thread(_read_file)
+                result_b64 = await _read_file_async()
                 if result_b64:
                     return result_b64
                 else:
