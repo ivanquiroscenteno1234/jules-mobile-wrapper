@@ -7,3 +7,4 @@ google-generativeai
 python-multipart
 httpx
 python-dotenv
+aiofiles
