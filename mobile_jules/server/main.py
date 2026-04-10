@@ -1500,20 +1500,26 @@ class TestRequest(BaseModel):
 
 URL_HISTORY_FILE = "test_urls.json"
 
-def save_url_to_history(url: str):
-    """Save unique URL to history file."""
-    urls = []
+def _read_urls():
     if os.path.exists(URL_HISTORY_FILE):
         try:
             with open(URL_HISTORY_FILE, "r") as f:
-                urls = json.load(f)
+                return json.load(f)
         except:
-            urls = []
+            return []
+    return []
+
+def _write_urls(urls):
+    with open(URL_HISTORY_FILE, "w") as f:
+        json.dump(urls, f)
+
+async def save_url_to_history(url: str):
+    """Save unique URL to history file asynchronously."""
+    urls = await asyncio.to_thread(_read_urls)
             
     if url not in urls:
         urls.append(url)
-        with open(URL_HISTORY_FILE, "w") as f:
-            json.dump(urls, f)
+        await asyncio.to_thread(_write_urls, urls)
 
 @app.post("/test/start")
 async def start_test(request: TestRequest):
@@ -1528,7 +1534,7 @@ async def start_test(request: TestRequest):
     start_mcp_server()
     
     test_id = str(uuid.uuid4())[:8]
-    save_url_to_history(request.url)
+    await save_url_to_history(request.url)
     
     # Start the test as a background async task in the current event loop
     task = asyncio.create_task(
@@ -1638,13 +1644,7 @@ async def retry_test_deeper(test_id: str):
 @app.get("/test/urls")
 async def get_test_urls():
     """Get list of previously used test URLs."""
-    if os.path.exists(URL_HISTORY_FILE):
-        try:
-            with open(URL_HISTORY_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
+    return await asyncio.to_thread(_read_urls)
 
 @app.get("/tests")
 async def list_tests():
