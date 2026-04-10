@@ -1733,8 +1733,11 @@ async def speech_to_text(file: UploadFile = File(...)):
             safe_ext = "audio"
         temp_filename = f"temp_{uuid.uuid4()}.{safe_ext}"
 
-        with open(temp_filename, "wb") as buffer:
-            buffer.write(await file.read())
+        content = await file.read()
+        def write_file():
+            with open(temp_filename, "wb") as buffer:
+                buffer.write(content)
+        await asyncio.to_thread(write_file)
         
         # Using Gemini 3 Flash with thinking_level="medium"
         # Requires google-genai >= 1.51.0
@@ -1759,14 +1762,20 @@ async def speech_to_text(file: UploadFile = File(...)):
         )
         
         # Cleanup
-        os.remove(temp_filename)
+        def remove_file():
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
+        await asyncio.to_thread(remove_file)
         
         return {"text": response.text.strip()}
     
     except Exception as e:
         print(f"STT Error: {e}")
-        if 'temp_filename' in locals() and os.path.exists(temp_filename):
-            os.remove(temp_filename)
+        if 'temp_filename' in locals():
+            def safe_remove():
+                if os.path.exists(temp_filename):
+                    os.remove(temp_filename)
+            await asyncio.to_thread(safe_remove)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
 if __name__ == "__main__":
