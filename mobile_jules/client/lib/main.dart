@@ -18,18 +18,21 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize local notifications (skip on web - not supported)
   if (!kIsWeb) {
     await _initNotifications();
   }
-  
+
   // Generate user_id if not exists
   final prefs = await SharedPreferences.getInstance();
   if (prefs.getString('user_id') == null) {
-    await prefs.setString('user_id', 'user_${DateTime.now().millisecondsSinceEpoch}');
+    await prefs.setString(
+      'user_id',
+      'user_${DateTime.now().millisecondsSinceEpoch}',
+    );
   }
-  
+
   runApp(const MyApp());
 }
 
@@ -41,10 +44,10 @@ Future<void> _initNotifications() async {
   // iOS initialization
   const DarwinInitializationSettings initializationSettingsIOS =
       DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
 
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
@@ -75,12 +78,13 @@ Future<void> _initNotifications() async {
       }
     },
   );
-  
+
   // Request permissions on Android 13+ (skip on web)
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     await flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.requestNotificationsPermission();
   }
 }
@@ -100,20 +104,20 @@ Future<void> showNotification({
 
   const AndroidNotificationDetails androidNotificationDetails =
       AndroidNotificationDetails(
-    'jules_channel',
-    'Jules Updates',
-    channelDescription: 'Notifications from Jules AI assistant',
-    importance: Importance.max,
-    priority: Priority.high,
-    ticker: 'Jules Update',
-  );
+        'jules_channel',
+        'Jules Updates',
+        channelDescription: 'Notifications from Jules AI assistant',
+        importance: Importance.max,
+        priority: Priority.high,
+        ticker: 'Jules Update',
+      );
 
   const DarwinNotificationDetails iOSNotificationDetails =
       DarwinNotificationDetails(
-    presentAlert: true,
-    presentBadge: true,
-    presentSound: true,
-  );
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
 
   const NotificationDetails notificationDetails = NotificationDetails(
     android: androidNotificationDetails,
@@ -176,22 +180,19 @@ class _MyAppState extends State<MyApp> {
           );
         }
         if (settings.name == '/creds') {
-          return MaterialPageRoute(
-            builder: (context) => const CredsScreen(),
-          );
+          return MaterialPageRoute(builder: (context) => const CredsScreen());
         }
         if (settings.name == '/test') {
           final args = settings.arguments as Map<String, dynamic>?;
           return MaterialPageRoute(
-            builder: (context) => TestScreen(
-              key: args != null ? ValueKey(args.hashCode) : null,
-            ),
+            builder: (context) =>
+                TestScreen(key: args != null ? ValueKey(args.hashCode) : null),
             settings: settings,
           );
         }
         return null;
       },
-      
+
       // Light Theme
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -199,16 +200,15 @@ class _MyAppState extends State<MyApp> {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-        ),
+        appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
         cardTheme: CardThemeData(
           elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
-      
+
       // Dark Theme with high contrast text
       darkTheme: ThemeData(
         brightness: Brightness.dark,
@@ -220,37 +220,46 @@ class _MyAppState extends State<MyApp> {
         ),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF11111B),
-        
+
         // Text themes with bright colors
         textTheme: const TextTheme(
           bodyLarge: TextStyle(color: Colors.white),
           bodyMedium: TextStyle(color: Colors.white),
           bodySmall: TextStyle(color: Colors.white70),
-          titleLarge: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          titleLarge: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
           titleMedium: TextStyle(color: Colors.white),
           labelLarge: TextStyle(color: Colors.white),
         ),
-        
+
         appBarTheme: const AppBarTheme(
           centerTitle: true,
           elevation: 0,
           backgroundColor: Color(0xFF1E1E2E),
           foregroundColor: Colors.white,
-          titleTextStyle: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        
+
         cardTheme: CardThemeData(
           elevation: 4,
           color: const Color(0xFF2A2A3E),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
-        
+
         listTileTheme: const ListTileThemeData(
           iconColor: Colors.white,
           textColor: Colors.white,
           subtitleTextStyle: TextStyle(color: Colors.white70),
         ),
-        
+
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: const Color(0xFF2A2A3E),
@@ -261,15 +270,15 @@ class _MyAppState extends State<MyApp> {
             borderSide: BorderSide.none,
           ),
         ),
-        
+
         chipTheme: const ChipThemeData(
           backgroundColor: Color(0xFF3A3A4E),
           labelStyle: TextStyle(color: Colors.white),
         ),
-        
+
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      
+
       home: const HomeScreen(),
     );
   }

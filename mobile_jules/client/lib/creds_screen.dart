@@ -50,16 +50,18 @@ class _CredsScreenState extends State<CredsScreen> {
 
   Future<void> _loadCreds(String repoFullName) async {
     setState(() => _isLoadingCreds = true);
-    
+
     try {
       final parts = repoFullName.split('/');
       if (parts.length != 2) return;
-      
+
       final response = await http.get(
-        Uri.parse('${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/credentials'),
+        Uri.parse(
+          '${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/credentials',
+        ),
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
@@ -81,12 +83,12 @@ class _CredsScreenState extends State<CredsScreen> {
 
   Future<void> _addCred() async {
     if (_selectedRepo == null) return;
-    
+
     final nameController = TextEditingController();
     final usernameController = TextEditingController();
     final passwordController = TextEditingController();
     bool obscurePassword = true;
-    
+
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -121,9 +123,17 @@ class _CredsScreenState extends State<CredsScreen> {
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      icon: Icon(obscurePassword ? Icons.visibility : Icons.visibility_off),
-                      tooltip: obscurePassword ? 'Show Password' : 'Hide Password',
-                      onPressed: () => setDialogState(() => obscurePassword = !obscurePassword),
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility
+                            : Icons.visibility_off,
+                      ),
+                      tooltip: obscurePassword
+                          ? 'Show Password'
+                          : 'Hide Password',
+                      onPressed: () => setDialogState(
+                        () => obscurePassword = !obscurePassword,
+                      ),
                     ),
                   ),
                 ),
@@ -143,15 +153,17 @@ class _CredsScreenState extends State<CredsScreen> {
         ),
       ),
     );
-    
-    if (result == true && 
-        nameController.text.isNotEmpty && 
-        usernameController.text.isNotEmpty && 
+
+    if (result == true &&
+        nameController.text.isNotEmpty &&
+        usernameController.text.isNotEmpty &&
         passwordController.text.isNotEmpty) {
       try {
         final parts = _selectedRepo!.split('/');
         final response = await http.post(
-          Uri.parse('${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/credentials'),
+          Uri.parse(
+            '${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/credentials',
+          ),
           headers: {
             'ngrok-skip-browser-warning': 'true',
             'Content-Type': 'application/json',
@@ -162,11 +174,11 @@ class _CredsScreenState extends State<CredsScreen> {
             'password': passwordController.text,
           }),
         );
-        
+
         if (response.statusCode == 200) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Credential saved!')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Credential saved!')));
           _loadCreds(_selectedRepo!);
         } else {
           throw Exception('Failed to save credential');
@@ -198,18 +210,18 @@ class _CredsScreenState extends State<CredsScreen> {
         ],
       ),
     );
-    
+
     if (confirm == true) {
       try {
         final response = await http.delete(
           Uri.parse('${AppConfig.serverUrl}/credentials/$credId'),
           headers: {'ngrok-skip-browser-warning': 'true'},
         );
-        
+
         if (response.statusCode == 200) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Credential deleted')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Credential deleted')));
           _loadCreds(_selectedRepo!);
         }
       } catch (e) {
@@ -223,7 +235,7 @@ class _CredsScreenState extends State<CredsScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage Credentials'),
@@ -247,36 +259,39 @@ class _CredsScreenState extends State<CredsScreen> {
                   ),
                   const SizedBox(height: 12),
                   _isLoadingRepos
-                    ? const Center(child: CircularProgressIndicator())
-                    : DropdownButtonFormField<String>(
-                        value: _selectedRepo,
-                        decoration: InputDecoration(
-                          prefixIcon: const Icon(Icons.folder_outlined),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      ? const Center(child: CircularProgressIndicator())
+                      : DropdownButtonFormField<String>(
+                          value: _selectedRepo,
+                          decoration: InputDecoration(
+                            prefixIcon: const Icon(Icons.folder_outlined),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            hintText: 'Select a repository',
                           ),
-                          hintText: 'Select a repository',
+                          isExpanded: true,
+                          items: _repos.map((repo) {
+                            final fullName = repo['full_name'] ?? '';
+                            return DropdownMenuItem<String>(
+                              value: fullName,
+                              child: Text(
+                                fullName,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() => _selectedRepo = value);
+                            if (value != null) {
+                              _loadCreds(value);
+                            }
+                          },
                         ),
-                        isExpanded: true,
-                        items: _repos.map((repo) {
-                          final fullName = repo['full_name'] ?? '';
-                          return DropdownMenuItem<String>(
-                            value: fullName,
-                            child: Text(fullName, overflow: TextOverflow.ellipsis),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => _selectedRepo = value);
-                          if (value != null) {
-                            _loadCreds(value);
-                          }
-                        },
-                      ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Credentials List
             Expanded(
               child: _buildGlassCard(
@@ -289,7 +304,10 @@ class _CredsScreenState extends State<CredsScreen> {
                       children: [
                         Text(
                           'Saved Credentials (${_creds.length})',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
                         ),
                         if (_selectedRepo != null)
                           ElevatedButton.icon(
@@ -307,7 +325,7 @@ class _CredsScreenState extends State<CredsScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    
+
                     if (_selectedRepo == null)
                       const Expanded(
                         child: Center(
@@ -327,7 +345,11 @@ class _CredsScreenState extends State<CredsScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.lock_outline, size: 48, color: Colors.grey),
+                              Icon(
+                                Icons.lock_outline,
+                                size: 48,
+                                color: Colors.grey,
+                              ),
                               SizedBox(height: 12),
                               Text(
                                 'No credentials saved',
@@ -341,29 +363,45 @@ class _CredsScreenState extends State<CredsScreen> {
                       Expanded(
                         child: ListView.separated(
                           itemCount: _creds.length,
-                          separatorBuilder: (context, index) => const Divider(height: 1),
+                          separatorBuilder: (context, index) =>
+                              const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final cred = _creds[index];
                             return ListTile(
-                              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 4,
+                              ),
                               leading: Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
                                   color: Colors.deepPurple.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: const Icon(Icons.person, color: Colors.deepPurple, size: 20),
+                                child: const Icon(
+                                  Icons.person,
+                                  color: Colors.deepPurple,
+                                  size: 20,
+                                ),
                               ),
                               title: Text(
                                 cred['name'] ?? 'Unnamed',
-                                style: const TextStyle(fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               subtitle: Text(
                                 cred['username'] ?? '',
-                                style: TextStyle(color: isDark ? Colors.white60 : Colors.grey[600]),
+                                style: TextStyle(
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                ),
                               ),
                               trailing: IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.red,
+                                ),
                                 tooltip: 'Delete Credential',
                                 onPressed: () => _deleteCred(cred['id']),
                               ),
@@ -385,14 +423,14 @@ class _CredsScreenState extends State<CredsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: isDark 
-          ? Colors.white.withOpacity(0.07) 
-          : Colors.white.withOpacity(0.8),
+        color: isDark
+            ? Colors.white.withOpacity(0.07)
+            : Colors.white.withOpacity(0.8),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark 
-            ? Colors.white.withOpacity(0.12) 
-            : Colors.deepPurple.withOpacity(0.15),
+          color: isDark
+              ? Colors.white.withOpacity(0.12)
+              : Colors.deepPurple.withOpacity(0.15),
           width: 0.5,
         ),
         boxShadow: [

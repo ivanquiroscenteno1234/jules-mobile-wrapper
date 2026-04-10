@@ -57,9 +57,13 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
           _filteredRepos = _repos;
           _isLoading = false;
         });
-        print('[GitHubReposScreen] Successfully loaded ${_repos.length} repositories.');
+        print(
+          '[GitHubReposScreen] Successfully loaded ${_repos.length} repositories.',
+        );
       } else {
-        print('[GitHubReposScreen] Failed to load repositories: ${response.statusCode}');
+        print(
+          '[GitHubReposScreen] Failed to load repositories: ${response.statusCode}',
+        );
         setState(() {
           _error = 'Failed to load repositories';
           _isLoading = false;
@@ -98,7 +102,10 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
                   Expanded(
                     child: Text(
                       'This action is permanent and cannot be undone!',
-                      style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -124,19 +131,25 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
     );
 
     if (confirmed != true) {
-      print('[GitHubReposScreen] Deletion cancelled for "${repo['full_name']}".');
+      print(
+        '[GitHubReposScreen] Deletion cancelled for "${repo['full_name']}".',
+      );
       return false;
     }
 
     print('[GitHubReposScreen] Deleting repository "${repo['full_name']}"...');
     try {
       final response = await http.delete(
-        Uri.parse('${AppConfig.serverUrl}/github/repos/${repo['owner']}/${repo['name']}'),
+        Uri.parse(
+          '${AppConfig.serverUrl}/github/repos/${repo['owner']}/${repo['name']}',
+        ),
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
 
       if (response.statusCode == 200) {
-        print('[GitHubReposScreen] Successfully deleted "${repo['full_name']}".');
+        print(
+          '[GitHubReposScreen] Successfully deleted "${repo['full_name']}".',
+        );
         setState(() {
           _repos.removeWhere((r) => r['full_name'] == repo['full_name']);
           _filterRepos(_searchController.text);
@@ -149,18 +162,20 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
         return true;
       } else {
         final errorData = jsonDecode(response.body);
-        final errorMessage = errorData['detail'] ?? 'Failed to delete repository';
-        print('[GitHubReposScreen] Error deleting "${repo['full_name']}": $errorMessage');
+        final errorMessage =
+            errorData['detail'] ?? 'Failed to delete repository';
+        print(
+          '[GitHubReposScreen] Error deleting "${repo['full_name']}": $errorMessage',
+        );
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('[GitHubReposScreen] Exception while deleting "${repo['full_name']}": $e');
+      print(
+        '[GitHubReposScreen] Exception while deleting "${repo['full_name']}": $e',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
       return false;
@@ -187,9 +202,11 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
         final lowerQuery = query.toLowerCase();
         setState(() {
           _filteredRepos = _repos
-              .where((repo) =>
-                  repo['name'].toLowerCase().contains(lowerQuery) ||
-                  repo['full_name'].toLowerCase().contains(lowerQuery))
+              .where(
+                (repo) =>
+                    repo['name'].toLowerCase().contains(lowerQuery) ||
+                    repo['full_name'].toLowerCase().contains(lowerQuery),
+              )
               .toList();
         });
       }
@@ -236,99 +253,119 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(_error!, style: const TextStyle(color: Colors.red)),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _loadRepos,
-                        child: const Text('Retry'),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(_error!, style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _loadRepos,
+                    child: const Text('Retry'),
                   ),
-                )
-              : _repos.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.folder_off, size: 64, color: Colors.grey),
-                          SizedBox(height: 16),
-                          Text('No repositories found', style: TextStyle(color: Colors.grey)),
-                          SizedBox(height: 8),
-                          Text(
-                            'Create a new repo from a "No Codebase" session',
-                            style: TextStyle(color: Colors.grey, fontSize: 12),
-                          ),
-                        ],
+                ],
+              ),
+            )
+          : _repos.isEmpty
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.folder_off, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'No repositories found',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Create a new repo from a "No Codebase" session',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _loadRepos,
+              child: ListView.builder(
+                itemCount: _filteredRepos.length,
+                itemBuilder: (context, index) {
+                  final repo = _filteredRepos[index];
+                  return Dismissible(
+                    key: Key(repo['full_name']),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 20),
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
                       ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _loadRepos,
-                      child: ListView.builder(
-                        itemCount: _filteredRepos.length,
-                        itemBuilder: (context, index) {
-                          final repo = _filteredRepos[index];
-                          return Dismissible(
-                            key: Key(repo['full_name']),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(Icons.delete, color: Colors.white),
-                            ),
-                            confirmDismiss: (direction) => _deleteRepo(repo),
-                            child: Card(
-                              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              child: ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor: repo['private'] ? Colors.amber[100] : Colors.blue[100],
-                                  child: Icon(
-                                    repo['private'] ? Icons.lock : Icons.public,
-                                    color: repo['private'] ? Colors.amber[800] : Colors.blue[800],
-                                  ),
-                                ),
-                                title: Text(
-                                  repo['name'],
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      repo['full_name'],
-                                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                                    ),
-                                    if (repo['description'] != null && repo['description'].isNotEmpty)
-                                      Text(
-                                        repo['description'],
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                                      ),
-                                  ],
-                                ),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.open_in_new),
-                                  tooltip: 'Open in GitHub',
-                                  onPressed: () => _openRepo(repo),
-                                ),
-                                onTap: () => _openRepo(repo),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.delete, color: Colors.white),
+                    ),
+                    confirmDismiss: (direction) => _deleteRepo(repo),
+                    child: Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: repo['private']
+                              ? Colors.amber[100]
+                              : Colors.blue[100],
+                          child: Icon(
+                            repo['private'] ? Icons.lock : Icons.public,
+                            color: repo['private']
+                                ? Colors.amber[800]
+                                : Colors.blue[800],
+                          ),
+                        ),
+                        title: Text(
+                          repo['name'],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              repo['full_name'],
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
                               ),
                             ),
-                          );
-                        },
+                            if (repo['description'] != null &&
+                                repo['description'].isNotEmpty)
+                              Text(
+                                repo['description'],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                          ],
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.open_in_new),
+                          tooltip: 'Open in GitHub',
+                          onPressed: () => _openRepo(repo),
+                        ),
+                        onTap: () => _openRepo(repo),
                       ),
                     ),
+                  );
+                },
+              ),
+            ),
     );
   }
 }

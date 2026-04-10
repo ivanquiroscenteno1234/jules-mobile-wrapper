@@ -13,17 +13,18 @@ class TestScreen extends StatefulWidget {
   State<TestScreen> createState() => _TestScreenState();
 }
 
-class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateMixin {
+class _TestScreenState extends State<TestScreen>
+    with SingleTickerProviderStateMixin {
   final _urlController = TextEditingController();
   final _objectiveController = TextEditingController();
   late TabController _tabController;
-  
+
   bool _isRunning = false;
   String? _testId;
   Map<String, dynamic>? _testResult;
   Timer? _pollTimer;
   List<String> _urlHistory = [];
-  
+
   // History state
   List<dynamic> _allTests = [];
   bool _isLoadingHistory = false;
@@ -78,7 +79,8 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
         // Now use repoName directly if it's in owner/repo format
         final displayName = args['repoName'] as String?;
         if (displayName != null && displayName.contains('/')) {
-          repoValue = displayName;  // Use the display name which is already owner/repo
+          repoValue =
+              displayName; // Use the display name which is already owner/repo
         }
         setState(() {
           _selectedRepo = repoValue;
@@ -143,14 +145,16 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
 
   Future<void> _loadPresetsAndCreds(String repoFullName) async {
     setState(() => _isLoadingData = true);
-    
+
     final parts = repoFullName.split('/');
     if (parts.length != 2) return;
-    
+
     try {
       // Fetch presets
       final presetsResponse = await http.get(
-        Uri.parse('${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/presets'),
+        Uri.parse(
+          '${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/presets',
+        ),
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
       if (presetsResponse.statusCode == 200) {
@@ -163,10 +167,12 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           _presets = [];
         }
       }
-      
+
       // Fetch credentials
       final credsResponse = await http.get(
-        Uri.parse('${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/credentials'),
+        Uri.parse(
+          '${AppConfig.serverUrl}/repos/${parts[0]}/${parts[1]}/credentials',
+        ),
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
       if (credsResponse.statusCode == 200) {
@@ -182,7 +188,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     } catch (e) {
       print('Error loading data: $e');
     }
-    
+
     setState(() {
       _isLoadingData = false;
       _selectedPresetId = null;
@@ -192,8 +198,11 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
 
   void _onPresetSelected(String? presetId) {
     if (presetId == null) return;
-    
-    final preset = _presets.firstWhere((p) => p['id'] == presetId, orElse: () => {});
+
+    final preset = _presets.firstWhere(
+      (p) => p['id'] == presetId,
+      orElse: () => {},
+    );
     if (preset.isNotEmpty) {
       setState(() {
         _selectedPresetId = presetId;
@@ -238,7 +247,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       // If a credential is selected, fetch the full credential data
       String? username;
       String? password;
-      
+
       if (_selectedCredId != null) {
         final credResponse = await http.get(
           Uri.parse('${AppConfig.serverUrl}/credentials/$_selectedCredId'),
@@ -250,7 +259,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           password = credData['password'];
         }
       }
-      
+
       final response = await http.post(
         Uri.parse('${AppConfig.serverUrl}/test/start'),
         headers: {
@@ -268,16 +277,16 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         _testId = data['test_id'];
-        setState(() => _testResult = data); 
+        setState(() => _testResult = data);
         _startPolling();
       } else {
         throw Exception('Failed to start test: ${response.body}');
       }
     } catch (e) {
       setState(() => _isRunning = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -288,8 +297,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       _selectedHistoryTest = null;
       _tabController.animateTo(0);
     });
-    
-    _testId = null; // Clear old ID to avoid immediate status fetch before new one starts
+
+    _testId =
+        null; // Clear old ID to avoid immediate status fetch before new one starts
 
     try {
       final endpoint = deeper ? 'retry-deeper' : 'retry';
@@ -309,9 +319,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       }
     } catch (e) {
       setState(() => _isRunning = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -332,9 +342,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           _isRunning = false;
           _pollTimer?.cancel();
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Test cancelled')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Test cancelled')));
       }
     } catch (e) {
       print('Error cancelling test: $e');
@@ -387,10 +397,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          _buildRunnerTab(),
-          _buildHistoryTab(),
-        ],
+        children: [_buildRunnerTab(), _buildHistoryTab()],
       ),
     );
   }
@@ -401,8 +408,10 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_testResult == null) _buildRunnerForm()
-          else _buildActiveTestView(),
+          if (_testResult == null)
+            _buildRunnerForm()
+          else
+            _buildActiveTestView(),
         ],
       ),
     );
@@ -417,11 +426,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              Icon(
-                Icons.psychology,
-                size: 48,
-                color: Colors.deepPurple[300],
-              ),
+              Icon(Icons.psychology, size: 48, color: Colors.deepPurple[300]),
               const SizedBox(height: 8),
               Text(
                 'AI-Powered Testing',
@@ -441,9 +446,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             ],
           ),
         ),
-        
+
         const SizedBox(height: 16),
-        
+
         // URL Input with Autocomplete
         Autocomplete<String>(
           optionsBuilder: (TextEditingValue textEditingValue) {
@@ -467,7 +472,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             controller.addListener(() {
               _urlController.text = controller.text;
             });
-            
+
             return TextField(
               controller: controller,
               focusNode: focusNode,
@@ -483,7 +488,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             );
           },
         ),
-        
+
         const SizedBox(height: 16),
 
         // Repository, Preset, and Credentials Dropdowns
@@ -501,39 +506,42 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                 ),
               ),
               const SizedBox(height: 12),
-              
+
               // Repository Dropdown
               _isLoadingRepos
-                ? const Center(child: CircularProgressIndicator())
-                : DropdownButtonFormField<String>(
-                    value: _selectedRepo,
-                    decoration: InputDecoration(
-                      labelText: 'Repository',
-                      prefixIcon: const Icon(Icons.folder_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                  ? const Center(child: CircularProgressIndicator())
+                  : DropdownButtonFormField<String>(
+                      value: _selectedRepo,
+                      decoration: InputDecoration(
+                        labelText: 'Repository',
+                        prefixIcon: const Icon(Icons.folder_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
+                      isExpanded: true,
+                      hint: const Text('Select repository'),
+                      items: _repos.map((repo) {
+                        final fullName = repo['full_name'] ?? '';
+                        return DropdownMenuItem<String>(
+                          value: fullName,
+                          child: Text(
+                            fullName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() => _selectedRepo = value);
+                        if (value != null) {
+                          _loadPresetsAndCreds(value);
+                        }
+                      },
                     ),
-                    isExpanded: true,
-                    hint: const Text('Select repository'),
-                    items: _repos.map((repo) {
-                      final fullName = repo['full_name'] ?? '';
-                      return DropdownMenuItem<String>(
-                        value: fullName,
-                        child: Text(fullName, overflow: TextOverflow.ellipsis),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() => _selectedRepo = value);
-                      if (value != null) {
-                        _loadPresetsAndCreds(value);
-                      }
-                    },
-                  ),
-              
+
               if (_selectedRepo != null && !_isLoadingData) ...[
                 const SizedBox(height: 12),
-                
+
                 // Test Preset Dropdown
                 DropdownButtonFormField<String>(
                   value: _selectedPresetId,
@@ -545,18 +553,23 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                     ),
                   ),
                   isExpanded: true,
-                  hint: Text(_presets.isEmpty ? 'No presets saved' : 'Select preset'),
+                  hint: Text(
+                    _presets.isEmpty ? 'No presets saved' : 'Select preset',
+                  ),
                   items: _presets.map((preset) {
                     return DropdownMenuItem<String>(
                       value: preset['id'],
-                      child: Text(preset['title'] ?? 'Untitled', overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        preset['title'] ?? 'Untitled',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     );
                   }).toList(),
                   onChanged: _presets.isEmpty ? null : _onPresetSelected,
                 ),
-                
+
                 const SizedBox(height: 12),
-                
+
                 // Credentials Dropdown
                 DropdownButtonFormField<String>(
                   value: _selectedCredId,
@@ -568,7 +581,11 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                     ),
                   ),
                   isExpanded: true,
-                  hint: Text(_creds.isEmpty ? 'No credentials saved' : 'Select credentials'),
+                  hint: Text(
+                    _creds.isEmpty
+                        ? 'No credentials saved'
+                        : 'Select credentials',
+                  ),
                   items: [
                     const DropdownMenuItem<String>(
                       value: null,
@@ -577,7 +594,10 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                     ..._creds.map((cred) {
                       return DropdownMenuItem<String>(
                         value: cred['id'],
-                        child: Text('${cred['name']} (${cred['username']})', overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          '${cred['name']} (${cred['username']})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       );
                     }),
                   ],
@@ -586,7 +606,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                   },
                 ),
               ],
-              
+
               if (_isLoadingData)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
@@ -595,9 +615,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             ],
           ),
         ),
-        
+
         const SizedBox(height: 16),
-        
+
         // Objective Input
         TextField(
           controller: _objectiveController,
@@ -605,15 +625,13 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             labelText: 'Test Objective',
             hintText: 'Verify the login form works correctly',
             prefixIcon: const Icon(Icons.flag),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
           maxLines: 3,
         ),
-        
+
         const SizedBox(height: 12),
-        
+
         // Template Chips
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -627,9 +645,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             ],
           ),
         ),
-        
+
         const SizedBox(height: 16),
-        
+
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -638,25 +656,27 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
               padding: const EdgeInsets.all(16),
               backgroundColor: Colors.deepPurple,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: _isRunning
-              ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.play_arrow),
+                      SizedBox(width: 8),
+                      Text('Start Test'),
+                    ],
                   ),
-                )
-              : const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.play_arrow),
-                    SizedBox(width: 8),
-                    Text('Start Test'),
-                  ],
-                ),
           ),
         ),
       ],
@@ -676,19 +696,27 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                 if (!_isRunning) _testResult = null;
               }),
             ),
-            const Text('Active Test', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Active Test',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             if (_isRunning)
               TextButton.icon(
                 onPressed: _cancelTest,
                 icon: const Icon(Icons.cancel, color: Colors.red),
-                label: const Text('Cancel', style: TextStyle(color: Colors.red)),
+                label: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
           ],
         ),
         if (_isRunning) ...[
           const SizedBox(height: 8),
-          _buildThinkingBubble(_testResult?['thinking'] ?? 'Agent is thinking...'),
+          _buildThinkingBubble(
+            _testResult?['thinking'] ?? 'Agent is thinking...',
+          ),
         ],
         const SizedBox(height: 16),
         _buildResultCard(_testResult!),
@@ -707,7 +735,10 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           const SizedBox(
             width: 16,
             height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.deepPurple,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -741,7 +772,10 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           children: [
             Icon(Icons.history_outlined, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            const Text('No test history yet', style: TextStyle(color: Colors.grey)),
+            const Text(
+              'No test history yet',
+              style: TextStyle(color: Colors.grey),
+            ),
           ],
         ),
       );
@@ -756,7 +790,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
         final isPassed = status == 'passed';
         final isFailed = status == 'failed';
         final date = DateTime.tryParse(test['started_at'] ?? '')?.toLocal();
-        final dateStr = date != null ? '${date.day}/${date.month} ${date.hour}:${date.minute}' : 'Recently';
+        final dateStr = date != null
+            ? '${date.day}/${date.month} ${date.hour}:${date.minute}'
+            : 'Recently';
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
@@ -765,12 +801,20 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: (isPassed ? Colors.green : (isFailed ? Colors.red : Colors.orange)).withOpacity(0.1),
+                  color:
+                      (isPassed
+                              ? Colors.green
+                              : (isFailed ? Colors.red : Colors.orange))
+                          .withOpacity(0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  isPassed ? Icons.check : (isFailed ? Icons.close : Icons.hourglass_bottom),
-                  color: isPassed ? Colors.green : (isFailed ? Colors.red : Colors.orange),
+                  isPassed
+                      ? Icons.check
+                      : (isFailed ? Icons.close : Icons.hourglass_bottom),
+                  color: isPassed
+                      ? Colors.green
+                      : (isFailed ? Colors.red : Colors.orange),
                   size: 20,
                 ),
               ),
@@ -809,17 +853,24 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                 tooltip: 'Back',
                 onPressed: () => setState(() => _selectedHistoryTest = null),
               ),
-              const Text('Test Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                'Test Details',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               const Spacer(),
               const SizedBox(width: 8),
-            ElevatedButton.icon(
-              onPressed: () => _retryTest(_selectedHistoryTest!['test_id'], deeper: true),
-              icon: const Icon(Icons.psychology, color: Colors.white),
-              label: const Text('Retry (Deeper)', style: TextStyle(color: Colors.white)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple,
+              ElevatedButton.icon(
+                onPressed: () =>
+                    _retryTest(_selectedHistoryTest!['test_id'], deeper: true),
+                icon: const Icon(Icons.psychology, color: Colors.white),
+                label: const Text(
+                  'Retry (Deeper)',
+                  style: TextStyle(color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                ),
               ),
-            ),
               ElevatedButton.icon(
                 onPressed: () => _retryTest(test['test_id']),
                 icon: const Icon(Icons.refresh, size: 16),
@@ -846,10 +897,10 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     final isPassed = status == 'passed';
     final isFailed = status == 'failed';
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     IconData icon;
     Color color;
-    
+
     if (isPassed) {
       icon = Icons.check_circle;
       color = Colors.green;
@@ -860,7 +911,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       icon = Icons.hourglass_bottom;
       color = Colors.orange;
     }
-    
+
     return _buildGlassCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -908,7 +959,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     List<Map<String, dynamic>> repos = [];
     bool isLoadingRepos = true;
     bool isSaving = false;
-    
+
     // Fetch repositories
     try {
       final response = await http.get(
@@ -927,7 +978,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       print('Error fetching repos: $e');
     }
     isLoadingRepos = false;
-    
+
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -945,29 +996,39 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Repository', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const Text(
+                'Repository',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
               const SizedBox(height: 4),
               isLoadingRepos
-                ? const Center(child: CircularProgressIndicator())
-                : DropdownButtonFormField<String>(
-                    value: selectedRepo,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ? const Center(child: CircularProgressIndicator())
+                  : DropdownButtonFormField<String>(
+                      value: selectedRepo,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      hint: const Text('Select repository'),
+                      isExpanded: true,
+                      items: repos.map((repo) {
+                        final fullName =
+                            repo['full_name'] ?? repo['name'] ?? '';
+                        return DropdownMenuItem<String>(
+                          value: fullName,
+                          child: Text(
+                            fullName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setDialogState(() => selectedRepo = value);
+                      },
                     ),
-                    hint: const Text('Select repository'),
-                    isExpanded: true,
-                    items: repos.map((repo) {
-                      final fullName = repo['full_name'] ?? repo['name'] ?? '';
-                      return DropdownMenuItem<String>(
-                        value: fullName,
-                        child: Text(fullName, overflow: TextOverflow.ellipsis),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setDialogState(() => selectedRepo = value);
-                    },
-                  ),
             ],
           ),
           actions: [
@@ -976,54 +1037,54 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: (selectedRepo == null || isSaving) 
-                ? null 
-                : () async {
-                    setDialogState(() => isSaving = true);
-                    try {
-                      final response = await http.post(
-                        Uri.parse(
-                          '${AppConfig.serverUrl}/test/$testId/save-as-preset'
-                          '?title=${Uri.encodeComponent(titleController.text)}'
-                          '&repo_full_name=${Uri.encodeComponent(selectedRepo!)}'
-                        ),
-                        headers: {'ngrok-skip-browser-warning': 'true'},
-                      );
-                      
-                      if (response.statusCode == 200) {
-                        if (context.mounted) Navigator.pop(context, true);
-                      } else {
-                        throw Exception('Failed to save preset');
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error: $e')),
+              onPressed: (selectedRepo == null || isSaving)
+                  ? null
+                  : () async {
+                      setDialogState(() => isSaving = true);
+                      try {
+                        final response = await http.post(
+                          Uri.parse(
+                            '${AppConfig.serverUrl}/test/$testId/save-as-preset'
+                            '?title=${Uri.encodeComponent(titleController.text)}'
+                            '&repo_full_name=${Uri.encodeComponent(selectedRepo!)}',
+                          ),
+                          headers: {'ngrok-skip-browser-warning': 'true'},
                         );
-                        setDialogState(() => isSaving = false);
+
+                        if (response.statusCode == 200) {
+                          if (context.mounted) Navigator.pop(context, true);
+                        } else {
+                          throw Exception('Failed to save preset');
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          setDialogState(() => isSaving = false);
+                        }
                       }
-                    }
-                  },
+                    },
               child: isSaving
-                ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Text('Save'),
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Text('Save'),
             ),
           ],
         ),
       ),
     );
-    
+
     if (result == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preset saved!')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Preset saved!')));
     }
   }
 
@@ -1060,7 +1121,9 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                   bottom: 0,
                   child: Container(
                     width: 2,
-                    color: (success ? Colors.green : Colors.red).withOpacity(0.3),
+                    color: (success ? Colors.green : Colors.red).withOpacity(
+                      0.3,
+                    ),
                   ),
                 ),
 
@@ -1074,18 +1137,42 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                     height: 14,
                     margin: const EdgeInsets.only(top: 0),
                     decoration: BoxDecoration(
-                      color: isRunning ? Colors.blue : (success ? Colors.green : Colors.red),
+                      color: isRunning
+                          ? Colors.blue
+                          : (success ? Colors.green : Colors.red),
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2),
                       boxShadow: isRunning
-                        ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8, spreadRadius: 2)]
-                        : null,
+                          ? [
+                              BoxShadow(
+                                color: Colors.blue.withOpacity(0.5),
+                                blurRadius: 8,
+                                spreadRadius: 2,
+                              ),
+                            ]
+                          : null,
                     ),
                     child: isRunning
-                      ? const Center(child: Padding(padding: EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 1, color: Colors.white)))
-                      : (success
-                          ? const Icon(Icons.check, size: 8, color: Colors.white)
-                          : const Icon(Icons.close, size: 8, color: Colors.white)),
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1,
+                                color: Colors.white,
+                              ),
+                            ),
+                          )
+                        : (success
+                              ? const Icon(
+                                  Icons.check,
+                                  size: 8,
+                                  color: Colors.white,
+                                )
+                              : const Icon(
+                                  Icons.close,
+                                  size: 8,
+                                  color: Colors.white,
+                                )),
                   ),
                   const SizedBox(width: 16),
                   // Step Content
@@ -1104,7 +1191,10 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                                 Expanded(
                                   child: Text(
                                     step['description'] ?? 'Step ${index + 1}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -1124,9 +1214,11 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontFamily: 'monospace',
-                                    color: Theme.of(context).brightness == Brightness.dark
-                                      ? Colors.white70
-                                      : Colors.grey[700],
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.white70
+                                        : Colors.grey[700],
                                   ),
                                 ),
                               ),
@@ -1137,37 +1229,82 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                                 step['reasoning'],
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Theme.of(context).brightness == Brightness.dark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
                                 ),
                               ),
                             ],
-                            if (step['alternative_selectors'] != null && (step['alternative_selectors'] as List).isNotEmpty) ...[
+                            if (step['alternative_selectors'] != null &&
+                                (step['alternative_selectors'] as List)
+                                    .isNotEmpty) ...[
                               const SizedBox(height: 8),
-                              const Text('Alternative Selectors:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                              const Text(
+                                'Alternative Selectors:',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               const SizedBox(height: 4),
                               Wrap(
                                 spacing: 4,
-                                children: (step['alternative_selectors'] as List).map((s) => Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.withOpacity(0.05),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.blue.withOpacity(0.1)),
-                                  ),
-                                  child: Text(s.toString(), style: const TextStyle(fontSize: 8, fontFamily: 'monospace')),
-                                )).toList(),
+                                children:
+                                    (step['alternative_selectors'] as List)
+                                        .map(
+                                          (s) => Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue.withOpacity(
+                                                0.05,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                              border: Border.all(
+                                                color: Colors.blue.withOpacity(
+                                                  0.1,
+                                                ),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              s.toString(),
+                                              style: const TextStyle(
+                                                fontSize: 8,
+                                                fontFamily: 'monospace',
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
                               ),
                             ],
-                            if (step['debug_info'] != null && (step['debug_info'] as Map).isNotEmpty) ...[
+                            if (step['debug_info'] != null &&
+                                (step['debug_info'] as Map).isNotEmpty) ...[
                               const SizedBox(height: 8),
-                              const Text('Debug Map:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                              const Text(
+                                'Debug Map:',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               const SizedBox(height: 4),
-                              ... (step['debug_info'] as Map).entries.map((e) => Padding(
-                                padding: const EdgeInsets.only(bottom: 2),
-                                child: Text('• ${e.key}: ${e.value}', style: const TextStyle(fontSize: 8)),
-                              )).toList(),
+                              ...(step['debug_info'] as Map).entries
+                                  .map(
+                                    (e) => Padding(
+                                      padding: const EdgeInsets.only(bottom: 2),
+                                      child: Text(
+                                        '• ${e.key}: ${e.value}',
+                                        style: const TextStyle(fontSize: 8),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
                             ],
                             if (step['error'] != null) ...[
                               const SizedBox(height: 8),
@@ -1179,29 +1316,39 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                                    const Icon(
+                                      Icons.error_outline,
+                                      size: 14,
+                                      color: Colors.red,
+                                    ),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
                                         step['error'],
-                                        style: const TextStyle(color: Colors.red, fontSize: 11),
+                                        style: const TextStyle(
+                                          color: Colors.red,
+                                          fontSize: 11,
+                                        ),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
                             ],
-                            if (step['screenshot'] != null && step['screenshot'].toString().isNotEmpty) ...[
+                            if (step['screenshot'] != null &&
+                                step['screenshot'].toString().isNotEmpty) ...[
                               const SizedBox(height: 12),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 clipBehavior: Clip.antiAlias,
                                 child: Image.memory(
                                   base64Decode(step['screenshot']),
-                                  height: 148, // Reduced from 150 to avoid rounding overflow
+                                  height:
+                                      148, // Reduced from 150 to avoid rounding overflow
                                   width: double.infinity,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const SizedBox.shrink(),
                                 ),
                               ),
                             ],
@@ -1224,14 +1371,14 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: isDark 
-          ? Colors.white.withOpacity(0.07) 
-          : Colors.white.withOpacity(0.8),
+        color: isDark
+            ? Colors.white.withOpacity(0.07)
+            : Colors.white.withOpacity(0.8),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark 
-            ? Colors.white.withOpacity(0.12) 
-            : Colors.deepPurple.withOpacity(0.15),
+          color: isDark
+              ? Colors.white.withOpacity(0.12)
+              : Colors.deepPurple.withOpacity(0.15),
           width: 0.5,
         ),
         boxShadow: [
@@ -1255,7 +1402,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
   Widget _buildPageStateBadge(String state) {
     final color = _getPageStateColor(state);
     final icon = _getPageStateIcon(state);
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -1283,25 +1430,39 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
 
   Color _getPageStateColor(String state) {
     switch (state.toUpperCase()) {
-      case 'LANDING': return Colors.blue;
-      case 'LOGIN': return Colors.green;
-      case 'DASHBOARD': return Colors.orange;
-      case 'ERROR': return Colors.red;
-      case 'SEARCH': return Colors.cyan;
-      case 'CHECKOUT': return Colors.purple;
-      default: return Colors.grey;
+      case 'LANDING':
+        return Colors.blue;
+      case 'LOGIN':
+        return Colors.green;
+      case 'DASHBOARD':
+        return Colors.orange;
+      case 'ERROR':
+        return Colors.red;
+      case 'SEARCH':
+        return Colors.cyan;
+      case 'CHECKOUT':
+        return Colors.purple;
+      default:
+        return Colors.grey;
     }
   }
 
   IconData _getPageStateIcon(String state) {
     switch (state.toUpperCase()) {
-      case 'LANDING': return Icons.home;
-      case 'LOGIN': return Icons.login;
-      case 'DASHBOARD': return Icons.dashboard;
-      case 'ERROR': return Icons.error_outline;
-      case 'SEARCH': return Icons.search;
-      case 'CHECKOUT': return Icons.shopping_cart;
-      default: return Icons.insert_drive_file;
+      case 'LANDING':
+        return Icons.home;
+      case 'LOGIN':
+        return Icons.login;
+      case 'DASHBOARD':
+        return Icons.dashboard;
+      case 'ERROR':
+        return Icons.error_outline;
+      case 'SEARCH':
+        return Icons.search;
+      case 'CHECKOUT':
+        return Icons.shopping_cart;
+      default:
+        return Icons.insert_drive_file;
     }
   }
 
@@ -1309,10 +1470,12 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ActionChip(
+        tooltip: 'Quick select: $label',
         label: Text(label, style: const TextStyle(fontSize: 12)),
         onPressed: () {
           setState(() {
-            _objectiveController.text = 'Verify the $label works correctly and has no errors.';
+            _objectiveController.text =
+                'Verify the $label works correctly and has no errors.';
           });
         },
         backgroundColor: Colors.deepPurple.withOpacity(0.05),
