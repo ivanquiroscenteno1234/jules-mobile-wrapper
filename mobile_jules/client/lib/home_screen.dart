@@ -354,6 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onPressed: _showNewTaskDialog,
         icon: const Icon(Icons.add),
         label: const Text('New Task'),
+        tooltip: 'Create a new task',
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
       ),

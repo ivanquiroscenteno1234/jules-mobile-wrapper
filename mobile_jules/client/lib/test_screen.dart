@@ -1310,6 +1310,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
       padding: const EdgeInsets.only(right: 8),
       child: ActionChip(
         label: Text(label, style: const TextStyle(fontSize: 12)),
+        tooltip: 'Use $label template',
         onPressed: () {
           setState(() {
             _objectiveController.text = 'Verify the $label works correctly and has no errors.';
