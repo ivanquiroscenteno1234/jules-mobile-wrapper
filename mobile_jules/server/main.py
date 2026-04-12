@@ -898,7 +898,8 @@ async def _handle_websocket(
             print(f"DEBUG: Waiting for user's first message to create session for source {source_id}")
         
     except Exception as e:
-        await websocket.send_json({"type": "error", "content": str(e)})
+        print(f"Error handling websocket: {e}", flush=True)
+        await websocket.send_json({"type": "error", "content": "An internal server error occurred."})
         await websocket.close()
         return
 
@@ -949,7 +950,8 @@ async def _handle_websocket(
                     poller_task = asyncio.create_task(poll_jules())
                     
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "content": f"Failed to create session: {e}"})
+                    print(f"Failed to create session: {e}", flush=True)
+                    await websocket.send_json({"type": "error", "content": "Failed to create session due to an internal error."})
                     
             else:
                 # Session already exists, handle commands or send messages
