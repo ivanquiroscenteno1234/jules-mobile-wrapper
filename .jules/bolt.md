@@ -9,3 +9,7 @@
 **Bottleneck:** Synchronous I/O in async context blocks event loops.
 **Learning:** For async context, using `aiofiles` is optimal for I/O bound operations. However, CPU bound operations like base64 encoding should still be executed in a thread pool via `asyncio.to_thread` to ensure the event loop isn't blocked.
 **Prevention:** Profile performance-critical code carefully.
+
+## 2025-04-13 - [Flutter List Rendering Performance]
+**Learning:** In Flutter, rendering large datasets like Git patch diffs using a standard `ListView` with a `map().toList()` pattern instantiates all child widgets at once. This causes massive memory spikes and UI thread jank, especially when nested inside a `DraggableScrollableSheet`.
+**Action:** Always use `ListView.builder` for large lists to ensure lazy widget instantiation, improving rendering performance and avoiding memory limits.

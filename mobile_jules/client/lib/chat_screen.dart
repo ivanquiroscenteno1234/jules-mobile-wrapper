@@ -1372,6 +1372,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _showFullDiff(String patch) {
+    // ⚡ Bolt: Pre-split lines once to avoid repeated allocations during scrolling
+    final diffLines = patch.split('\n');
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1400,10 +1402,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
             Expanded(
-              child: ListView(
+              // ⚡ Bolt: Replaced ListView with ListView.builder for lazy rendering of large diff patches.
+              // This prevents memory spikes and UI thread jank by only instantiating visible line widgets.
+              child: ListView.builder(
                 controller: scrollController,
                 padding: const EdgeInsets.all(16),
-                children: patch.split('\n').map((line) => _buildDiffLine(line)).toList(),
+                itemCount: diffLines.length,
+                itemBuilder: (context, index) {
+                  return _buildDiffLine(diffLines[index]);
+                },
               ),
             ),
           ],
