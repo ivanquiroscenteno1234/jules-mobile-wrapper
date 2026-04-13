@@ -1309,6 +1309,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ActionChip(
+        tooltip: 'Use $label template',
         label: Text(label, style: const TextStyle(fontSize: 12)),
         onPressed: () {
           setState(() {
