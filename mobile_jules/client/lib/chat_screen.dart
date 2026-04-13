@@ -1106,6 +1106,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: ActionChip(
+        tooltip: 'Use $label template',
         label: Text(
           label, 
           style: const TextStyle(
