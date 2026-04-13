@@ -220,7 +220,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _startTest() async {
+  Future<void> _startTest({bool deeper = false}) async {
     if (_urlController.text.isEmpty || _objectiveController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter URL and test objective')),
@@ -235,22 +235,6 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     });
 
     try {
-      // If a credential is selected, fetch the full credential data
-      String? username;
-      String? password;
-      
-      if (_selectedCredId != null) {
-        final credResponse = await http.get(
-          Uri.parse('${AppConfig.serverUrl}/credentials/$_selectedCredId'),
-          headers: {'ngrok-skip-browser-warning': 'true'},
-        );
-        if (credResponse.statusCode == 200) {
-          final credData = json.decode(credResponse.body);
-          username = credData['username'];
-          password = credData['password'];
-        }
-      }
-      
       final response = await http.post(
         Uri.parse('${AppConfig.serverUrl}/test/start'),
         headers: {
@@ -260,8 +244,8 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
         body: json.encode({
           'url': _urlController.text,
           'objective': _objectiveController.text,
-          'username': username,
-          'password': password,
+          'credential_id': _selectedCredId,
+          'deeper_analysis': deeper,
         }),
       );
 
