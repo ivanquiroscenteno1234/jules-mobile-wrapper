@@ -39,16 +39,18 @@ android {
         versionName = flutter.versionName
     }
 
+    val keyAliasProp = keystoreProperties.getProperty("keyAlias")
+    val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
+    val storeFileProp = keystoreProperties.getProperty("storeFile")
+    val storePasswordProp = keystoreProperties.getProperty("storePassword")
+    val hasReleaseConfig = keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null
+
     signingConfigs {
-        val keyAliasProp = keystoreProperties.getProperty("keyAlias")
-        val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
-        val storeFileProp = keystoreProperties.getProperty("storeFile")
-        val storePasswordProp = keystoreProperties.getProperty("storePassword")
-        if (keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null) {
+        if (hasReleaseConfig) {
             create("release") {
                 keyAlias = keyAliasProp
                 keyPassword = keyPasswordProp
-                storeFile = rootProject.file(storeFileProp)
+                storeFile = rootProject.file(storeFileProp!!)
                 storePassword = storePasswordProp
             }
         }
@@ -56,12 +58,7 @@ android {
 
     buildTypes {
         release {
-            val keyAliasProp = keystoreProperties.getProperty("keyAlias")
-            val keyPasswordProp = keystoreProperties.getProperty("keyPassword")
-            val storeFileProp = keystoreProperties.getProperty("storeFile")
-            val storePasswordProp = keystoreProperties.getProperty("storePassword")
-
-            if (keyAliasProp != null && keyPasswordProp != null && storeFileProp != null && storePasswordProp != null) {
+            if (hasReleaseConfig) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
