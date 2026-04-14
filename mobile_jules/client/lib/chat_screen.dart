@@ -1115,6 +1115,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             fontWeight: FontWeight.w500,
           ),
         ),
+        tooltip: 'Use $label template',
         onPressed: () {
           _controller.text = prefix;
           _controller.selection = TextSelection.fromPosition(
