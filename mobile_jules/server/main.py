@@ -1777,8 +1777,20 @@ async def speech_to_text(file: UploadFile = File(...)):
             safe_ext = "audio"
         temp_filename = f"temp_{uuid.uuid4()}.{safe_ext}"
 
-        with open(temp_filename, "wb") as buffer:
-            buffer.write(await file.read())
+        # 25MB size limit
+        MAX_FILE_SIZE = 25 * 1024 * 1024
+        file_size = 0
+
+        try:
+            with open(temp_filename, "wb") as buffer:
+                while chunk := await file.read(8192):
+                    file_size += len(chunk)
+                    if file_size > MAX_FILE_SIZE:
+                        raise HTTPException(status_code=413, detail="File too large. Maximum size is 25MB.")
+                    buffer.write(chunk)
+        except HTTPException:
+            os.remove(temp_filename)
+            raise
         
         # Using Gemini 3 Flash with thinking_level="medium"
         # Requires google-genai >= 1.51.0
