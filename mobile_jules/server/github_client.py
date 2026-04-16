@@ -15,6 +15,7 @@ import httpx
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
+HUNK_PATTERN = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 class GitHubClient:
     """Client for interacting with GitHub REST API to create branches and PRs."""
@@ -412,7 +413,7 @@ class GitHubClient:
                     file_changes[current_file]["is_deleted"] = True
             elif line.startswith("@@"):
                 # Hunk header: @@ -start,count +start,count @@
-                match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+                match = HUNK_PATTERN.match(line)
                 if match and current_file:
                     file_changes[current_file]["hunks"].append({
                         "old_start": int(match.group(1)),

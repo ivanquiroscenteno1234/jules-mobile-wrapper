@@ -541,21 +541,6 @@ async def delete_credential(credential_id: str):
     
     raise HTTPException(status_code=404, detail="Credential not found")
 
-@app.get("/credentials/{credential_id}")
-async def get_credential(credential_id: str):
-    """Get a credential by ID (returns username and password for test execution)."""
-    for repo_key, creds in credentials_data.items():
-        for cred in creds:
-            if cred["id"] == credential_id:
-                return {
-                    "id": cred["id"],
-                    "name": cred["name"],
-                    "username": cred["username"],
-                    "password": decrypt_password(cred["password"])
-                }
-    
-    raise HTTPException(status_code=404, detail="Credential not found")
-
 @app.get("/repos/{owner}/{repo}/branches")
 async def list_repo_branches(owner: str, repo: str):
     """List all branches in a GitHub repository."""
@@ -898,7 +883,8 @@ async def _handle_websocket(
             print(f"DEBUG: Waiting for user's first message to create session for source {source_id}")
         
     except Exception as e:
-        await websocket.send_json({"type": "error", "content": str(e)})
+        print(f"Error handling websocket: {e}", flush=True)
+        await websocket.send_json({"type": "error", "content": "An internal server error occurred."})
         await websocket.close()
         return
 
@@ -949,7 +935,8 @@ async def _handle_websocket(
                     poller_task = asyncio.create_task(poll_jules())
                     
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "content": f"Failed to create session: {e}"})
+                    print(f"Failed to create session: {e}", flush=True)
+                    await websocket.send_json({"type": "error", "content": "Failed to create session due to an internal error."})
                     
             else:
                 # Session already exists, handle commands or send messages
@@ -1507,6 +1494,7 @@ class TestRequest(BaseModel):
     objective: str
     username: Optional[str] = None
     password: Optional[str] = None
+    credential_id: Optional[str] = None
     deeper_analysis: bool = False
 
 URL_HISTORY_FILE = "test_urls.json"
@@ -1547,14 +1535,33 @@ async def start_test(request: TestRequest):
     test_id = str(uuid.uuid4())[:8]
     await save_url_to_history(request.url)
     
+    # Resolve credentials if ID is provided
+    username = request.username
+    password = request.password
+
+    if request.credential_id:
+        cred_found = False
+        for repo_key, creds in credentials_data.items():
+            for cred in creds:
+                if cred["id"] == request.credential_id:
+                    username = cred["username"]
+                    password = decrypt_password(cred["password"])
+                    cred_found = True
+                    break
+            if cred_found:
+                break
+
+        if not cred_found:
+            raise HTTPException(status_code=404, detail="Credential not found")
+
     # Start the test as a background async task in the current event loop
     task = asyncio.create_task(
         tester_agent.run_test(
             test_id, 
             request.url, 
             request.objective,
-            username=request.username,
-            password=request.password,
+            username=username,
+            password=password,
             deeper_analysis=request.deeper_analysis
         )
     )
@@ -1819,8 +1826,10 @@ async def speech_to_text(file: UploadFile = File(...)):
         
         return {"text": response.text.strip()}
     
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        if 'temp_filename' in locals() and os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        raise he
     except Exception as e:
         print(f"STT Error: {e}")
         if 'temp_filename' in locals() and os.path.exists(temp_filename):

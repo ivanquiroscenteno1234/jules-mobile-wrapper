@@ -66,7 +66,9 @@ class ChatMessage {
       isWaiting: json['isWaiting'],
       hasPatch: json['hasPatch'],
       sessionId: json['sessionId'],
-      artifacts: json['artifacts'] != null ? List<Map<String, dynamic>>.from(json['artifacts']) : null,
+      artifacts: json['artifacts'] != null
+          ? List<Map<String, dynamic>>.from(json['artifacts'])
+          : null,
     );
   }
 
@@ -104,9 +106,9 @@ class ChatScreen extends StatefulWidget {
   final bool autoMode; // Auto-create PR mode
 
   const ChatScreen({
-    super.key, 
-    required this.repoName, 
-    this.sourceId,  // Now optional
+    super.key,
+    required this.repoName,
+    this.sourceId, // Now optional
     this.sessionId,
     this.initialPrompt,
     this.autoMode = false,
@@ -123,24 +125,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<ChatMessage> _messages = [];
   bool _isConnected = false;
   bool _isConnecting = false;
-  bool _isWaiting = false; // Start as false - button should be enabled for new sessions
+  bool _isWaiting =
+      false; // Start as false - button should be enabled for new sessions
   String? _currentSessionId;
   String? _pendingPlanId;
-  
+
   // Publish state tracking
   bool _isPublishing = false;
   String? _publishStatus; // 'success', 'error', or null
   String? _publishMessage; // Success/error message
   String? _createdPrUrl; // URL of the created PR
   String? _createdBranchUrl; // URL of the created branch
-  
+
   // Branch selection
   List<String> _availableBranches = [];
   String _selectedBranch = 'main';
   bool _isLoadingBranches = false;
-  
+
   // Session state tracking
-  String _sessionState = 'UNKNOWN'; // QUEUED, PLANNING, AWAITING_PLAN_APPROVAL, IN_PROGRESS, COMPLETED, FAILED
+  String _sessionState =
+      'UNKNOWN'; // QUEUED, PLANNING, AWAITING_PLAN_APPROVAL, IN_PROGRESS, COMPLETED, FAILED
 
   // Audio recording
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -173,7 +177,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() {
       _appLifecycleState = state;
     });
-    
+
     if (state == AppLifecycleState.resumed) {
       // Reconnect if connection was lost while in background
       if (!_isConnected) {
@@ -186,57 +190,58 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _connect() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('user_id');
-    
+
     final wsUrl = AppConfig.serverUrl.replaceFirst('http', 'ws');
-    
+
     // Use repoless endpoint when no sourceId provided
     String uri;
     if (widget.sourceId != null && widget.sourceId!.isNotEmpty) {
       uri = '$wsUrl/chat/${widget.sourceId}';
     } else {
-      uri = '$wsUrl/chat';  // Repoless endpoint
+      uri = '$wsUrl/chat'; // Repoless endpoint
     }
-    
+
     // Build query parameters
     final queryParams = <String, String>{};
-    
+
     if (widget.sessionId != null) {
       queryParams['session_id'] = widget.sessionId!;
     }
-    
+
     if (userId != null) {
       queryParams['user_id'] = userId;
     }
-    
+
     // Pass auto_mode setting (only for repo-based sessions)
     if ((widget.autoMode || AppConfig.autoMode) && widget.sourceId != null) {
       queryParams['auto_mode'] = 'true';
     }
-    
+
     if (queryParams.isNotEmpty) {
-      uri += '?${queryParams.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
+      uri +=
+          '?${queryParams.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
     }
-    
+
     try {
       setState(() {
         _isConnecting = true;
       });
-      
+
       _channel = WebSocketChannel.connect(Uri.parse(uri));
-      
+
       // Wait for connection to be established
       await _channel.ready;
-      
+
       setState(() {
         _isConnected = true;
         _isConnecting = false;
       });
-      
+
       // Pre-load branches if we have a repo context
       if (widget.sourceId != null && widget.sourceId!.isNotEmpty) {
         final sourceId = widget.sourceId!;
         String? owner, repo;
-        
+
         // Handle "sources/github/owner/repo" format
         if (sourceId.startsWith('sources/github/')) {
           final repoPath = sourceId.substring('sources/github/'.length);
@@ -263,7 +268,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             repo = parts[1];
           }
         }
-        
+
         if (owner != null && repo != null) {
           print('Pre-loading branches for $owner/$repo');
           _fetchBranches(owner, repo);
@@ -276,7 +281,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _fetchBranches(parts[0], parts[1]);
         }
       }
-      
+
       // Auto-send initial prompt if provided
       if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
         // Small delay to ensure WebSocket is ready
@@ -286,44 +291,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
         });
       }
-      
+
       _channel.stream.listen(
         (message) {
           try {
             final json = jsonDecode(message);
             final chatMsg = ChatMessage.fromJson(json);
-            
+
             setState(() {
-              print('DEBUG: Incoming message type=${chatMsg.type}, id=${chatMsg.id}, content=${chatMsg.content.length > 30 ? chatMsg.content.substring(0, 30) + "..." : chatMsg.content}');
-              
+              print(
+                'DEBUG: Incoming message type=${chatMsg.type}, id=${chatMsg.id}, content=${chatMsg.content.length > 30 ? chatMsg.content.substring(0, 30) + "..." : chatMsg.content}',
+              );
+
               // Handle transient status messages (e.g., "Creating session...", "Jules is working...")
               if (chatMsg.type == 'status') {
                 // A new status message replaces any previous ones
                 _messages.removeWhere((m) => m.type == 'status');
-              } else if (chatMsg.type == 'system' || chatMsg.type == 'progress' || 
-                  chatMsg.type == 'plan' || chatMsg.type == 'completed' ||
-                  chatMsg.type == 'message' || chatMsg.type == 'error' ||
+              } else if (chatMsg.type == 'system' ||
+                  chatMsg.type == 'progress' ||
+                  chatMsg.type == 'plan' ||
+                  chatMsg.type == 'completed' ||
+                  chatMsg.type == 'message' ||
+                  chatMsg.type == 'error' ||
                   chatMsg.type == 'artifact') {
                 // Any real update clears all transient status messages
                 _messages.removeWhere((m) => m.type == 'status');
               }
-              
+
               // Prevent duplicate messages by checking ID
               final isDuplicate = _messages.any((m) => m.id == chatMsg.id);
               if (!isDuplicate) {
                 _messages.add(chatMsg);
-                
+
                 // Show notification if app is backgrounded
                 if (_appLifecycleState != AppLifecycleState.resumed) {
                   _maybeShowNotification(chatMsg);
                 }
               }
-              
+
               // Track session ID
               if (json['sessionId'] != null) {
                 _currentSessionId = json['sessionId'];
               }
-              
+
               // Track session state
               if (json['sessionState'] != null) {
                 _sessionState = json['sessionState'];
@@ -331,20 +341,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               // Infer state from message types
               if (chatMsg.type == 'plan') {
                 _sessionState = 'AWAITING_PLAN_APPROVAL';
-              } else if (chatMsg.type == 'progress' || chatMsg.type == 'artifact') {
+              } else if (chatMsg.type == 'progress' ||
+                  chatMsg.type == 'artifact') {
                 _sessionState = 'IN_PROGRESS';
               } else if (chatMsg.type == 'completed') {
                 _sessionState = 'COMPLETED';
               } else if (chatMsg.type == 'failed') {
                 _sessionState = 'FAILED';
               }
-               // Track pending plan for approval
+              // Track pending plan for approval
               if (chatMsg.type == 'plan' && chatMsg.planId != null) {
                 _pendingPlanId = chatMsg.planId;
               }
-              
+
               // Clear pending plan if session is completed or approved
-              if (chatMsg.type == 'completed' || chatMsg.type == 'plan_approved') {
+              if (chatMsg.type == 'completed' ||
+                  chatMsg.type == 'plan_approved') {
                 _pendingPlanId = null;
               }
 
@@ -352,8 +364,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (chatMsg.type == 'progress') {
                 final content = chatMsg.content?.toLowerCase() ?? '';
                 // Skip past-tense progress messages (completed actions shouldn't be working indicator)
-                final isPastTense = content.endsWith('ed') || 
-                    content.contains('completed') || 
+                final isPastTense =
+                    content.endsWith('ed') ||
+                    content.contains('completed') ||
                     content.contains('reviewed') ||
                     content.contains('finished') ||
                     content.contains('done');
@@ -361,15 +374,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _currentProgressTitle = chatMsg.content;
                 }
               }
-              
+
               // Clear progress title on real messages (Jules finished that step)
               if (chatMsg.type == 'message' || chatMsg.type == 'artifact') {
-                _currentProgressTitle = null;  // Reset to default "Jules is working..."
+                _currentProgressTitle =
+                    null; // Reset to default "Jules is working..."
               }
-              
+
               // Only stop waiting on completion events or when Jules needs input
               // Keep waiting for: progress, status, artifact, and regular messages while working
-              if (chatMsg.type == 'completed' || 
+              if (chatMsg.type == 'completed' ||
                   chatMsg.type == 'plan' ||
                   chatMsg.type == 'error') {
                 _isWaiting = false;
@@ -379,11 +393,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           } catch (e) {
             // Fallback for non-JSON messages (legacy)
             setState(() {
-              _messages.add(ChatMessage(
-                id: DateTime.now().millisecondsSinceEpoch.toString(),
-                type: 'message',
-                content: message.toString(),
-              ));
+              _messages.add(
+                ChatMessage(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  type: 'message',
+                  content: message.toString(),
+                ),
+              );
               _isWaiting = false;
             });
             _scrollToBottom();
@@ -391,11 +407,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         },
         onError: (error) {
           setState(() {
-            _messages.add(ChatMessage(
-              id: 'error',
-              type: 'system',
-              content: 'Connection Error: $error',
-            ));
+            _messages.add(
+              ChatMessage(
+                id: 'error',
+                type: 'system',
+                content: 'Connection Error: $error',
+              ),
+            );
             _isConnected = false;
             _isConnecting = false;
             _isWaiting = false;
@@ -403,11 +421,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         },
         onDone: () {
           setState(() {
-            _messages.add(ChatMessage(
-              id: 'disconnected',
-              type: 'system',
-              content: 'Disconnected.',
-            ));
+            _messages.add(
+              ChatMessage(
+                id: 'disconnected',
+                type: 'system',
+                content: 'Disconnected.',
+              ),
+            );
             _isConnected = false;
             _isConnecting = false;
             _isWaiting = false;
@@ -416,11 +436,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     } catch (e) {
       setState(() {
-        _messages.add(ChatMessage(
-          id: 'error',
-          type: 'system',
-          content: 'Could not connect: $e',
-        ));
+        _messages.add(
+          ChatMessage(
+            id: 'error',
+            type: 'system',
+            content: 'Could not connect: $e',
+          ),
+        );
         _isConnected = false;
         _isConnecting = false;
         _isWaiting = false;
@@ -446,14 +468,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _controller.clear();
     }
   }
-  
+
   void _sendMessageText(String text) {
     if (text.isNotEmpty && _isConnected) {
       setState(() {
         _messages.add(ChatMessage.user(text));
         _isWaiting = true;
       });
-      
+
       _channel.sink.add(text);
       _scrollToBottom();
     }
@@ -464,30 +486,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _channel.sink.add('/approve');
       setState(() {
         _pendingPlanId = null;
-        _isWaiting = true;  // Show working indicator after approval
+        _isWaiting = true; // Show working indicator after approval
       });
     }
   }
 
   Future<void> _fetchBranches(String owner, String repo) async {
     if (_isLoadingBranches) return;
-    
+
     setState(() {
       _isLoadingBranches = true;
     });
-    
+
     try {
       final response = await http.get(
         Uri.parse('${AppConfig.serverUrl}/repos/$owner/$repo/branches'),
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final branches = (data['branches'] as List)
             .map((b) => b['name'] as String)
             .toList();
-        
+
         setState(() {
           _availableBranches = branches;
           _isLoadingBranches = false;
@@ -513,28 +535,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _createGitHubPR(String sessionId, {bool branchOnly = false}) async {
+  Future<void> _createGitHubPR(
+    String sessionId, {
+    bool branchOnly = false,
+  }) async {
     setState(() {
       _isPublishing = true;
       _publishStatus = null;
       _publishMessage = null;
     });
-    
+
     try {
-      final uri = Uri.parse('${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/github-pr')
-          .replace(queryParameters: {
-            'base_branch': _selectedBranch,
-            'branch_only': branchOnly.toString(),
-          });
-      
+      final uri =
+          Uri.parse(
+            '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/github-pr',
+          ).replace(
+            queryParameters: {
+              'base_branch': _selectedBranch,
+              'branch_only': branchOnly.toString(),
+            },
+          );
+
       final response = await http.post(
         uri,
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        
+
         if (data['type'] == 'branch') {
           // Branch only created
           setState(() {
@@ -575,17 +604,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         Uri.parse('${AppConfig.serverUrl}/sessions/$sessionId/patch'),
         headers: {'ngrok-skip-browser-warning': 'true'},
       );
-      
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final patchContent = data['instructions'] ?? data['patch'] ?? '';
-        
+
         await Clipboard.setData(ClipboardData(text: patchContent));
-        
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Patch copied to clipboard! Use \'git apply patch.diff\' to apply.'),
+              content: Text(
+                'Patch copied to clipboard! Use \'git apply patch.diff\' to apply.',
+              ),
               duration: Duration(seconds: 3),
             ),
           );
@@ -595,9 +626,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error copying patch: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error copying patch: $e')));
       }
     }
   }
@@ -637,7 +668,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     'Analyzing code changes and creating test objectives',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withOpacity(0.7),
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -648,15 +681,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ),
     );
-    
+
     try {
       // Build URL with optional pr_url parameter
-      var url = '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/generate-test';
+      var url =
+          '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/generate-test';
       final effectivePrUrl = prUrl ?? _createdPrUrl;
       if (effectivePrUrl != null) {
         url += '?pr_url=${Uri.encodeComponent(effectivePrUrl)}';
       }
-      
+
       final response = await http.post(
         Uri.parse(url),
         headers: {
@@ -664,14 +698,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           'Content-Type': 'application/json',
         },
       );
-      
+
       // Dismiss loading dialog
       if (mounted) Navigator.of(context).pop();
-      
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final test = data['test'] as Map<String, dynamic>?;
-        
+
         if (test != null && mounted) {
           // Navigate to TestScreen with pre-filled data including repository
           Navigator.pushNamed(
@@ -681,8 +715,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               'url': test['url'] ?? '/',
               'objective': test['objective'] ?? 'Verify changes work correctly',
               'steps': test['steps'] ?? [],
-              'repository': widget.sourceId,  // Pass the repository sourceId
-              'repoName': widget.repoName,    // Pass the display name
+              'repository': widget.sourceId, // Pass the repository sourceId
+              'repoName': widget.repoName, // Pass the display name
             },
           );
         }
@@ -693,7 +727,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           final errorData = jsonDecode(response.body);
           errorMsg = errorData['detail'] ?? errorMsg;
         } catch (_) {}
-        
+
         // Show user-friendly error
         if (errorMsg.contains('PR') || errorMsg.contains('branch')) {
           throw Exception('Create a PR or branch first to enable testing');
@@ -704,7 +738,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (e) {
       // Dismiss loading dialog on error
       if (mounted) Navigator.of(context).pop();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -736,8 +770,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } else {
         if (await _audioRecorder.hasPermission()) {
           final tempDir = await getTemporaryDirectory();
-          final path = p.join(tempDir.path, 'recording_${DateTime.now().millisecondsSinceEpoch}.m4a');
-          
+          final path = p.join(
+            tempDir.path,
+            'recording_${DateTime.now().millisecondsSinceEpoch}.m4a',
+          );
+
           const config = RecordConfig(); // Default config
           await _audioRecorder.start(config, path: path);
           setState(() => _isRecording = true);
@@ -758,7 +795,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _transcribeAudio(String path) async {
     setState(() => _isTranscribing = true);
     try {
-      final request = http.MultipartRequest('POST', Uri.parse('${AppConfig.serverUrl}/stt'));
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${AppConfig.serverUrl}/stt'),
+      );
       request.headers['ngrok-skip-browser-warning'] = 'true';
       request.files.add(await http.MultipartFile.fromPath('file', path));
 
@@ -767,21 +807,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final respStr = await response.stream.bytesToString();
         final data = jsonDecode(respStr);
         final text = data['text'] ?? '';
-        
+
         if (text.isNotEmpty) {
           setState(() {
             _controller.text = (_controller.text + ' ' + text).trim();
           });
         }
       } else {
-        throw Exception('Transcription failed with status: ${response.statusCode}');
+        throw Exception(
+          'Transcription failed with status: ${response.statusCode}',
+        );
       }
     } catch (e) {
       debugPrint('Transcription error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Speech to text failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Speech to text failed: $e')));
       }
     } finally {
       setState(() => _isTranscribing = false);
@@ -800,7 +842,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     bool isPrivate = false;
     bool isCreating = false;
     String? errorMessage;
-    
+
     showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -817,7 +859,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Repository Name', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Repository Name',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: nameController,
@@ -828,7 +873,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   onChanged: (_) => setDialogState(() {}),
                 ),
                 const SizedBox(height: 16),
-                const Text('Description (optional)', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Description (optional)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: descController,
@@ -842,7 +890,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 SwitchListTile(
                   title: const Text('Private Repository'),
                   subtitle: Text(
-                    isPrivate ? 'Only you can see this repository' : 'Anyone can see this repository',
+                    isPrivate
+                        ? 'Only you can see this repository'
+                        : 'Anyone can see this repository',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                   value: isPrivate,
@@ -851,7 +901,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 if (errorMessage != null) ...[
                   const SizedBox(height: 8),
-                  Text(errorMessage!, style: const TextStyle(color: Colors.red)),
+                  Text(
+                    errorMessage!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
                 ],
               ],
             ),
@@ -863,70 +916,84 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
             ElevatedButton(
               onPressed: (nameController.text.trim().isEmpty || isCreating)
-                ? null
-                : () async {
-                    setDialogState(() {
-                      isCreating = true;
-                      errorMessage = null;
-                    });
-                    
-                    try {
-                      final response = await http.post(
-                        Uri.parse('${AppConfig.serverUrl}/github/repos'),
-                        headers: {
-                          'ngrok-skip-browser-warning': 'true',
-                          'Content-Type': 'application/json',
-                        },
-                        body: jsonEncode({
-                          'name': nameController.text.trim(),
-                          'description': descController.text.trim(),
-                          'private': isPrivate,
-                        }),
-                      );
-                      
-                      if (response.statusCode == 200) {
-                        final data = jsonDecode(response.body);
-                        Navigator.pop(dialogContext);
-                        
-                        // Show success message with repo URL
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Repository "${data['name']}" created!'),
-                              action: SnackBarAction(
-                                label: 'Open',
-                                onPressed: () async {
-                                  final uri = Uri.parse(data['html_url']);
-                                  if (await canLaunchUrl(uri)) {
-                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                  }
-                                },
+                  ? null
+                  : () async {
+                      setDialogState(() {
+                        isCreating = true;
+                        errorMessage = null;
+                      });
+
+                      try {
+                        final response = await http.post(
+                          Uri.parse('${AppConfig.serverUrl}/github/repos'),
+                          headers: {
+                            'ngrok-skip-browser-warning': 'true',
+                            'Content-Type': 'application/json',
+                          },
+                          body: jsonEncode({
+                            'name': nameController.text.trim(),
+                            'description': descController.text.trim(),
+                            'private': isPrivate,
+                          }),
+                        );
+
+                        if (response.statusCode == 200) {
+                          final data = jsonDecode(response.body);
+                          Navigator.pop(dialogContext);
+
+                          // Show success message with repo URL
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Repository "${data['name']}" created!',
+                                ),
+                                action: SnackBarAction(
+                                  label: 'Open',
+                                  onPressed: () async {
+                                    final uri = Uri.parse(data['html_url']);
+                                    if (await canLaunchUrl(uri)) {
+                                      await launchUrl(
+                                        uri,
+                                        mode: LaunchMode.externalApplication,
+                                      );
+                                    }
+                                  },
+                                ),
+                                duration: const Duration(seconds: 5),
                               ),
-                              duration: const Duration(seconds: 5),
-                            ),
-                          );
+                            );
+                          }
+                        } else {
+                          final errorData = jsonDecode(response.body);
+                          setDialogState(() {
+                            isCreating = false;
+                            errorMessage =
+                                errorData['detail'] ??
+                                'Failed to create repository';
+                          });
                         }
-                      } else {
-                        final errorData = jsonDecode(response.body);
+                      } catch (e) {
                         setDialogState(() {
                           isCreating = false;
-                          errorMessage = errorData['detail'] ?? 'Failed to create repository';
+                          errorMessage = 'Error: $e';
                         });
                       }
-                    } catch (e) {
-                      setDialogState(() {
-                        isCreating = false;
-                        errorMessage = 'Error: $e';
-                      });
-                    }
-                  },
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.deepPurple,
                 foregroundColor: Colors.white,
               ),
-              child: isCreating 
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Create'),
+              child: isCreating
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Create'),
             ),
           ],
         ),
@@ -938,7 +1005,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     Color bgColor;
     Color textColor = Colors.white;
     String label;
-    
+
     switch (_sessionState) {
       case 'QUEUED':
         bgColor = Colors.grey;
@@ -977,7 +1044,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         bgColor = Colors.grey.shade400;
         label = _isConnected ? 'Connected' : 'Connecting...';
     }
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -1051,7 +1118,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     _buildTemplateChip('🧪 Add tests', 'Add unit tests for '),
                     _buildTemplateChip('📝 Add docs', 'Add documentation for '),
                     _buildTemplateChip('♻️ Refactor', 'Refactor the '),
-                    _buildTemplateChip('🔧 Configure', 'Update the configuration for '),
+                    _buildTemplateChip(
+                      '🔧 Configure',
+                      'Update the configuration for ',
+                    ),
                   ],
                 ),
               ),
@@ -1061,15 +1131,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             child: Row(
               children: [
                 IconButton(
-                  icon: _isRecording 
-                      ? const Icon(Icons.stop, color: Colors.red) 
-                      : _isTranscribing 
-                          ? const SizedBox(
-                              width: 20, 
-                              height: 20, 
-                              child: CircularProgressIndicator(strokeWidth: 2)
-                            )
-                          : const Icon(Icons.mic, color: Colors.deepPurple),
+                  icon: _isRecording
+                      ? const Icon(Icons.stop, color: Colors.red)
+                      : _isTranscribing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.mic, color: Colors.deepPurple),
                   onPressed: _isTranscribing ? null : _toggleRecording,
                   tooltip: _isRecording ? 'Stop recording' : 'Voice input',
                 ),
@@ -1106,10 +1176,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: ActionChip(
+        tooltip: 'Use $label template',
         label: Text(
-          label, 
+          label,
           style: const TextStyle(
-            fontSize: 12, 
+            fontSize: 12,
             color: Colors.black87,
             fontWeight: FontWeight.w500,
           ),
@@ -1125,7 +1196,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildMessageWidget(ChatMessage msg) {
-    print('DEBUG _buildMessageWidget: type=${msg.type}, content=${msg.content.substring(0, msg.content.length > 50 ? 50 : msg.content.length)}');
+    print(
+      'DEBUG _buildMessageWidget: type=${msg.type}, content=${msg.content.substring(0, msg.content.length > 50 ? 50 : msg.content.length)}',
+    );
     switch (msg.type) {
       case 'plan':
         return _buildPlanCard(msg);
@@ -1136,7 +1209,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       case 'status':
         return _buildStatusBadge(msg);
       case 'artifact':
-        return _buildJulesBubble(msg);  // Show artifacts as regular bubbles
+        return _buildJulesBubble(msg); // Show artifacts as regular bubbles
       case 'user':
         return _buildUserBubble(msg);
       case 'system':
@@ -1152,16 +1225,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildPlanCard(ChatMessage msg) {
     // Check if this plan is the pending one (needs approval)
-    final isPendingPlan = _pendingPlanId != null && msg.planId == _pendingPlanId;
-    
+    final isPendingPlan =
+        _pendingPlanId != null && msg.planId == _pendingPlanId;
+
     // A plan is considered approved if:
     // 1. It matches the planId of the plan that was just approved (if we tracked it)
     // 2. OR the session has moved past planning/approval stage
-    final isPlanApproved = _pendingPlanId == null && 
-                          (_sessionState == 'IN_PROGRESS' || 
-                           _sessionState == 'COMPLETED' || 
-                           _sessionState == 'FAILED');
-    
+    final isPlanApproved =
+        _pendingPlanId == null &&
+        (_sessionState == 'IN_PROGRESS' ||
+            _sessionState == 'COMPLETED' ||
+            _sessionState == 'FAILED');
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
@@ -1169,63 +1244,75 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ExpansionTile(
             leading: const Icon(Icons.list_alt, color: Colors.deepPurple),
             title: Text('Plan (${msg.steps?.length ?? 0} steps)'),
-            children: msg.steps?.asMap().entries.map((entry) {
-              final idx = entry.key;
-              final step = entry.value as Map<String, dynamic>;
-              return ListTile(
-                leading: CircleAvatar(
-                  radius: 12,
-                  backgroundColor: Colors.deepPurple,
-                  child: Text(
-                    '${idx + 1}',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-                title: Text(step['title'] ?? 'Step ${idx + 1}'),
-              );
-            }).toList() ?? [],
+            children:
+                msg.steps?.asMap().entries.map((entry) {
+                  final idx = entry.key;
+                  final step = entry.value as Map<String, dynamic>;
+                  return ListTile(
+                    leading: CircleAvatar(
+                      radius: 12,
+                      backgroundColor: Colors.deepPurple,
+                      child: Text(
+                        '${idx + 1}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    title: Text(step['title'] ?? 'Step ${idx + 1}'),
+                  );
+                }).toList() ??
+                [],
           ),
           // Approve button inside the plan card
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: isPlanApproved
-              ? Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green.shade200),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.green[700], size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Plan Accepted',
-                        style: TextStyle(
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.check_circle,
                           color: Colors.green[700],
-                          fontWeight: FontWeight.w600,
+                          size: 20,
                         ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Plan Accepted',
+                          style: TextStyle(
+                            color: Colors.green[700],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: isPendingPlan ? _approvePlan : null,
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: const Text('Approve Plan'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        disabledBackgroundColor: Colors.grey[300],
+                        disabledForegroundColor: Colors.grey[600],
                       ),
-                    ],
-                  ),
-                )
-              : SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: isPendingPlan ? _approvePlan : null,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Approve Plan'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      disabledBackgroundColor: Colors.grey[300],
-                      disabledForegroundColor: Colors.grey[600],
                     ),
                   ),
-                ),
           ),
         ],
       ),
@@ -1254,7 +1341,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildArtifactWidget(Map<String, dynamic> artifact) {
     final type = artifact['type'];
-    
+
     switch (type) {
       case 'file_change':
         return _buildFileChangeBadge(artifact);
@@ -1270,7 +1357,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildFileChangeBadge(Map<String, dynamic> artifact) {
     final commitMsg = artifact['commitMsg'] ?? '';
     final patch = artifact['patch'] ?? '';
-    
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Column(
@@ -1288,7 +1375,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               children: [
                 const Icon(Icons.edit_document, size: 16, color: Colors.green),
                 const SizedBox(width: 4),
-                const Text('File Changed', style: TextStyle(fontSize: 12, color: Colors.green)),
+                const Text(
+                  'File Changed',
+                  style: TextStyle(fontSize: 12, color: Colors.green),
+                ),
               ],
             ),
           ),
@@ -1304,8 +1394,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
           // Show diff preview if present
-          if (patch.isNotEmpty)
-            _buildDiffPreview(patch),
+          if (patch.isNotEmpty) _buildDiffPreview(patch),
         ],
       ),
     );
@@ -1313,10 +1402,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildDiffPreview(String patch) {
     if (patch.isEmpty) return const SizedBox.shrink();
-    
+
     // Parse diff and show first few lines
     final lines = patch.split('\n').take(10).toList();
-    
+
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(8),
@@ -1331,11 +1420,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             children: [
               const Icon(Icons.code, size: 14, color: Colors.white70),
               const SizedBox(width: 4),
-              const Text('Diff', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const Text(
+                'Diff',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
               const Spacer(),
               GestureDetector(
                 onTap: () => _showFullDiff(patch),
-                child: const Text('View Full', style: TextStyle(color: Colors.blue, fontSize: 12)),
+                child: const Text(
+                  'View Full',
+                  style: TextStyle(color: Colors.blue, fontSize: 12),
+                ),
               ),
             ],
           ),
@@ -1357,20 +1452,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else if (line.startsWith('@@')) {
       color = Colors.cyanAccent;
     }
-    
+
     return Text(
       line,
-      style: TextStyle(
-        fontFamily: 'monospace',
-        fontSize: 11,
-        color: color,
-      ),
+      style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: color),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
   }
 
   void _showFullDiff(String patch) {
+    // ⚡ Bolt: Pre-split lines once to avoid repeated allocations during scrolling
+    final diffLines = patch.split('\n');
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1388,7 +1481,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 children: [
                   const Icon(Icons.code, color: Colors.white),
                   const SizedBox(width: 8),
-                  const Text('Code Changes', style: TextStyle(color: Colors.white, fontSize: 18)),
+                  const Text(
+                    'Code Changes',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white),
@@ -1399,10 +1495,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
             Expanded(
-              child: ListView(
+              // ⚡ Bolt: Replaced ListView with ListView.builder for lazy rendering of large diff patches.
+              // This prevents memory spikes and UI thread jank by only instantiating visible line widgets.
+              child: ListView.builder(
                 controller: scrollController,
                 padding: const EdgeInsets.all(16),
-                children: patch.split('\n').map((line) => _buildDiffLine(line)).toList(),
+                itemCount: diffLines.length,
+                itemBuilder: (context, index) {
+                  return _buildDiffLine(diffLines[index]);
+                },
               ),
             ),
           ],
@@ -1415,11 +1516,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final command = artifact['command'] ?? '';
     final output = artifact['output'] ?? '';
     final exitCode = artifact['exitCode'];
-    
+
     if (command.isEmpty && output.isEmpty) return const SizedBox.shrink();
-    
+
     final isSuccess = exitCode == null || exitCode == 0;
-    
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       padding: const EdgeInsets.all(8),
@@ -1450,9 +1551,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 // Exit code badge
                 if (exitCode != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
-                      color: isSuccess ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+                      color: isSuccess
+                          ? Colors.green.withOpacity(0.2)
+                          : Colors.red.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Row(
@@ -1497,7 +1603,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildMediaBadge(Map<String, dynamic> artifact) {
     final mimeType = artifact['mimeType'] ?? '';
-    
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1520,17 +1626,237 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildCompletedBadge(ChatMessage message) {
+    return CompletedTaskBadge(
+      message: message,
+      createdPrUrl: _createdPrUrl,
+      publishStatus: _publishStatus,
+      publishMessage: _publishMessage,
+      createdBranchUrl: _createdBranchUrl,
+      isLoadingBranches: _isLoadingBranches,
+      availableBranches: _availableBranches,
+      selectedBranch: _selectedBranch,
+      isPublishing: _isPublishing,
+      onTestChanges: _testChanges,
+      onFetchBranches: _fetchBranches,
+      onCreateGitHubPR: _createGitHubPR,
+      onBranchChanged: (value) {
+        if (value != null) {
+          setState(() => _selectedBranch = value);
+        }
+      },
+    );
+  }
+
+  Widget _buildStatusBadge(ChatMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final prUrl = message.pullRequestUrl ?? _createdPrUrl;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF3A3A4E) : Colors.grey[200],
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            msg.content,
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserBubble(ChatMessage msg) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.deepPurple[700] : Colors.deepPurple[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          msg.content,
+          style: TextStyle(
+            fontSize: 16,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSystemBubble(ChatMessage msg) {
+    return Align(
+      alignment: Alignment.center,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.orange[100],
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          msg.content,
+          style: const TextStyle(fontStyle: FontStyle.italic),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildJulesBubble(ChatMessage msg) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.8,
+        ),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          msg.content,
+          style: TextStyle(
+            fontSize: 16,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+          softWrap: true, // Allow text to wrap to multiple lines
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkingIndicator() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _currentProgressTitle ?? 'Jules is working...',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _maybeShowNotification(ChatMessage msg) {
+    String? title;
+    String? body;
+
+    if (msg.type == 'completed') {
+      title = '✅ Task Complete';
+      body = msg.content.isNotEmpty
+          ? msg.content
+          : 'Jules has finished working on your task.';
+    } else if (msg.type == 'plan') {
+      title = '📋 Plan Ready';
+      body = 'Jules generated a plan with ${msg.steps?.length ?? 0} steps.';
+    } else if (msg.type == 'message' && msg.originator == 'agent') {
+      title = '💬 Message from Jules';
+      body = msg.content;
+    } else if (msg.type == 'error') {
+      title = '❌ Error from Jules';
+      body = msg.content;
+    }
+
+    if (title != null && body != null) {
+      showNotification(
+        title: title,
+        body: body,
+        payload: jsonEncode({
+          'type': 'chat',
+          'sessionId': _currentSessionId,
+          'sourceId': widget.sourceId,
+          'repoName': widget.repoName,
+        }),
+      );
+    }
+  }
+}
+
+class CompletedTaskBadge extends StatelessWidget {
+  final ChatMessage message;
+  final String? createdPrUrl;
+  final String? publishStatus;
+  final String? publishMessage;
+  final String? createdBranchUrl;
+  final bool isLoadingBranches;
+  final List<String> availableBranches;
+  final String selectedBranch;
+  final bool isPublishing;
+  final Function(String sessionId, {String? prUrl}) onTestChanges;
+  final Function(String owner, String repo) onFetchBranches;
+  final Function(String sessionId, {bool branchOnly}) onCreateGitHubPR;
+  final ValueChanged<String?> onBranchChanged;
+
+  const CompletedTaskBadge({
+    super.key,
+    required this.message,
+    this.createdPrUrl,
+    this.publishStatus,
+    this.publishMessage,
+    this.createdBranchUrl,
+    required this.isLoadingBranches,
+    required this.availableBranches,
+    required this.selectedBranch,
+    required this.isPublishing,
+    required this.onTestChanges,
+    required this.onFetchBranches,
+    required this.onCreateGitHubPR,
+    required this.onBranchChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final prUrl = message.pullRequestUrl ?? createdPrUrl;
     final julesUrl = message.julesUrl;
     final hasPR = prUrl != null && prUrl.isNotEmpty;
     final hasPatch = message.hasPatch == true;
     final sessionId = message.sessionId;
     final prTitle = message.title ?? 'Task Completed';
     final prDescription = message.description;
-    
-    print('DEBUG _buildCompletedBadge: hasPR=$hasPR, hasPatch=$hasPatch, sessionId=$sessionId, julesUrl=$julesUrl');
-    
+
     return Column(
       children: [
         Row(
@@ -1614,7 +1940,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             message.repoName!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isDark ? Colors.grey[500] : Colors.grey[600],
+                              color: isDark
+                                  ? Colors.grey[500]
+                                  : Colors.grey[600],
                             ),
                           ),
                       ],
@@ -1636,31 +1964,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ],
               const SizedBox(height: 20),
-              
+
               // Status message (success/error)
-              if (_publishStatus != null) ...[
+              if (publishStatus != null) ...[
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
-                    color: _publishStatus == 'success' 
-                        ? Colors.green.withOpacity(0.1) 
+                    color: publishStatus == 'success'
+                        ? Colors.green.withOpacity(0.1)
                         : Colors.red.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
                       Icon(
-                        _publishStatus == 'success' ? Icons.check_circle : Icons.error,
+                        publishStatus == 'success'
+                            ? Icons.check_circle
+                            : Icons.error,
                         size: 16,
-                        color: _publishStatus == 'success' ? Colors.green : Colors.red,
+                        color: publishStatus == 'success'
+                            ? Colors.green
+                            : Colors.red,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _publishMessage ?? '',
+                          publishMessage ?? '',
                           style: TextStyle(
                             fontSize: 13,
-                            color: _publishStatus == 'success' ? Colors.green[700] : Colors.red[700],
+                            color: publishStatus == 'success'
+                                ? Colors.green[700]
+                                : Colors.red[700],
                           ),
                         ),
                       ),
@@ -1669,153 +2006,198 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 12),
               ],
-              
+
               // Show appropriate button
               if (hasPR) ...[
                 // PR exists - show view button
                 ElevatedButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(prUrl!), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(
+                    Uri.parse(prUrl!),
+                    mode: LaunchMode.externalApplication,
+                  ),
                   icon: const Icon(Icons.open_in_new, size: 18),
                   label: const Text('View Pull Request on GitHub'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green[600],
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 45),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
                 // Test Changes button - also available after PR is created
                 if (sessionId != null) ...[
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
-                    onPressed: () => _testChanges(sessionId, prUrl: prUrl),
+                    onPressed: () => onTestChanges(sessionId, prUrl: prUrl),
                     icon: const Icon(Icons.science_outlined, size: 18),
                     label: const Text('Test Changes'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange[600],
                       foregroundColor: Colors.white,
                       minimumSize: const Size(double.infinity, 45),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ],
-              ] else if (_createdBranchUrl != null) ...[                // Branch was created - show view button
+              ] else if (createdBranchUrl != null) ...[
+                // Branch was created - show view button
                 ElevatedButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(_createdBranchUrl!), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(
+                    Uri.parse(createdBranchUrl!),
+                    mode: LaunchMode.externalApplication,
+                  ),
                   icon: const Icon(Icons.open_in_new, size: 18),
                   label: const Text('View Branch on GitHub'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue[600],
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 45),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
                 // Test Changes button - also available after branch is created
                 if (sessionId != null) ...[
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
-                    onPressed: () => _testChanges(sessionId, prUrl: prUrl),
+                    onPressed: () => onTestChanges(sessionId, prUrl: prUrl),
                     icon: const Icon(Icons.science_outlined, size: 18),
                     label: const Text('Test Changes'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange[600],
                       foregroundColor: Colors.white,
                       minimumSize: const Size(double.infinity, 45),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ],
               ] else if (hasPatch && sessionId != null) ...[
                 // No PR yet but we have patch data - show branch dropdown and action buttons
-                
+
                 // Branch Dropdown
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
-                    border: Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[400]!),
+                    border: Border.all(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[400]!,
+                    ),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
-                      Text('Target Branch: ', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)),
+                      Text(
+                        'Target Branch: ',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: _isLoadingBranches
-                          ? const SizedBox(
-                              height: 20,
-                              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                            )
-                          : DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _availableBranches.contains(_selectedBranch) ? _selectedBranch : null,
-                                hint: Text(_selectedBranch),
-                                isExpanded: true,
-                                dropdownColor: isDark ? const Color(0xFF2A2A3E) : Colors.white,
-                                items: _availableBranches.map((branch) {
-                                  return DropdownMenuItem<String>(
-                                    value: branch,
-                                    child: Text(branch),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    setState(() => _selectedBranch = value);
-                                  }
-                                },
-                                onTap: () {
-                                  // Fetch branches on first tap if not loaded
-                                  if (_availableBranches.isEmpty && message.repoName != null) {
-                                    final parts = message.repoName!.split('/');
-                                    if (parts.length >= 2) {
-                                      // repoName is in format "owner/repo"
-                                      _fetchBranches(parts[0], parts[1]);
-                                    } else if (parts.length == 1) {
-                                      // Just repo name, try to get owner from session
-                                      _fetchBranches(parts[0], parts[0]);
+                        child: isLoadingBranches
+                            ? const SizedBox(
+                                height: 20,
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value:
+                                      availableBranches.contains(selectedBranch)
+                                      ? selectedBranch
+                                      : null,
+                                  hint: Text(selectedBranch),
+                                  isExpanded: true,
+                                  dropdownColor: isDark
+                                      ? const Color(0xFF2A2A3E)
+                                      : Colors.white,
+                                  items: availableBranches.map((branch) {
+                                    return DropdownMenuItem<String>(
+                                      value: branch,
+                                      child: Text(branch),
+                                    );
+                                  }).toList(),
+                                  onChanged: onBranchChanged,
+                                  onTap: () {
+                                    // Fetch branches on first tap if not loaded
+                                    if (availableBranches.isEmpty &&
+                                        message.repoName != null) {
+                                      final parts = message.repoName!.split(
+                                        '/',
+                                      );
+                                      if (parts.length >= 2) {
+                                        // repoName is in format "owner/repo"
+                                        onFetchBranches(parts[0], parts[1]);
+                                      } else if (parts.length == 1) {
+                                        // Just repo name, try to get owner from session
+                                        onFetchBranches(parts[0], parts[0]);
+                                      }
                                     }
-                                  }
-                                },
+                                  },
+                                ),
                               ),
-                            ),
                       ),
                       IconButton(
-                        icon: Icon(_isLoadingBranches ? Icons.hourglass_empty : Icons.refresh, size: 18),
+                        icon: Icon(
+                          isLoadingBranches
+                              ? Icons.hourglass_empty
+                              : Icons.refresh,
+                          size: 18,
+                        ),
                         tooltip: 'Refresh branches',
-                        onPressed: _isLoadingBranches ? null : () {
-                          if (message.repoName != null) {
-                            final parts = message.repoName!.split('/');
-                            if (parts.length >= 2) {
-                              _fetchBranches(parts[0], parts[1]);
-                            }
-                          }
-                        },
+                        onPressed: isLoadingBranches
+                            ? null
+                            : () {
+                                if (message.repoName != null) {
+                                  final parts = message.repoName!.split('/');
+                                  if (parts.length >= 2) {
+                                    onFetchBranches(parts[0], parts[1]);
+                                  }
+                                }
+                              },
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 12),
-                
+
                 // Action Buttons Row
                 Row(
                   children: [
                     // Create Branch Only button
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: _isPublishing ? null : () => _createGitHubPR(sessionId, branchOnly: true),
-                        icon: _isPublishing 
+                        onPressed: isPublishing
+                            ? null
+                            : () =>
+                                  onCreateGitHubPR(sessionId, branchOnly: true),
+                        icon: isPublishing
                             ? const SizedBox(
-                                width: 16, 
-                                height: 16, 
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
                             : const Icon(Icons.account_tree, size: 16),
-                        label: Text(_isPublishing ? '...' : 'Branch'),
+                        label: Text(isPublishing ? '...' : 'Branch'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue[600],
                           foregroundColor: Colors.white,
                           minimumSize: const Size(0, 45),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                       ),
                     ),
@@ -1824,20 +2206,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Expanded(
                       flex: 2,
                       child: ElevatedButton.icon(
-                        onPressed: _isPublishing ? null : () => _createGitHubPR(sessionId, branchOnly: false),
-                        icon: _isPublishing 
+                        onPressed: isPublishing
+                            ? null
+                            : () => onCreateGitHubPR(
+                                sessionId,
+                                branchOnly: false,
+                              ),
+                        icon: isPublishing
                             ? const SizedBox(
-                                width: 16, 
-                                height: 16, 
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
                             : const Icon(Icons.merge, size: 16),
-                        label: Text(_isPublishing ? 'Creating...' : 'Create PR'),
+                        label: Text(isPublishing ? 'Creating...' : 'Create PR'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.purple[600],
                           foregroundColor: Colors.white,
                           minimumSize: const Size(0, 45),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                       ),
                     ),
@@ -1846,14 +2238,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ] else if (julesUrl != null) ...[
                 // Fallback - open Jules Web
                 ElevatedButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(julesUrl), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(
+                    Uri.parse(julesUrl),
+                    mode: LaunchMode.externalApplication,
+                  ),
                   icon: const Icon(Icons.open_in_browser, size: 18),
                   label: const Text('Open in Jules Web'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.purple[600],
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 45),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ] else ...[
@@ -1872,157 +2269,5 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ],
     );
-  }
-
-  Widget _buildStatusBadge(ChatMessage msg) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF3A3A4E) : Colors.grey[200],
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          const SizedBox(width: 8),
-          Text(msg.content, style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700])),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUserBubble(ChatMessage msg) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isDark ? Colors.deepPurple[700] : Colors.deepPurple[100],
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(msg.content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
-      ),
-    );
-  }
-
-  Widget _buildSystemBubble(ChatMessage msg) {
-    return Align(
-      alignment: Alignment.center,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.orange[100],
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          msg.content,
-          style: const TextStyle(fontStyle: FontStyle.italic),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildJulesBubble(ChatMessage msg) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.8,
-        ),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          msg.content,
-          style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
-          softWrap: true,  // Allow text to wrap to multiple lines
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWorkingIndicator() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2A3E) : Colors.grey[200],
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Flexible(
-              child: Text(
-                _currentProgressTitle ?? 'Jules is working...',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDark ? Colors.white70 : Colors.black54,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _maybeShowNotification(ChatMessage msg) {
-    String? title;
-    String? body;
-    
-    if (msg.type == 'completed') {
-      title = '✅ Task Complete';
-      body = msg.content.isNotEmpty ? msg.content : 'Jules has finished working on your task.';
-    } else if (msg.type == 'plan') {
-      title = '📋 Plan Ready';
-      body = 'Jules generated a plan with ${msg.steps?.length ?? 0} steps.';
-    } else if (msg.type == 'message' && msg.originator == 'agent') {
-      title = '💬 Message from Jules';
-      body = msg.content;
-    } else if (msg.type == 'error') {
-      title = '❌ Error from Jules';
-      body = msg.content;
-    }
-
-    if (title != null && body != null) {
-      showNotification(
-        title: title,
-        body: body,
-        payload: jsonEncode({
-          'type': 'chat',
-          'sessionId': _currentSessionId,
-          'sourceId': widget.sourceId,
-          'repoName': widget.repoName,
-        }),
-      );
-    }
   }
 }
