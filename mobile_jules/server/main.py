@@ -1784,8 +1784,8 @@ async def speech_to_text(file: UploadFile = File(...)):
             safe_ext = "audio"
         temp_filename = f"temp_{uuid.uuid4()}.{safe_ext}"
 
+        MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
         file_size = 0
-        MAX_FILE_SIZE = 25 * 1024 * 1024 # 25MB limit
 
         with open(temp_filename, "wb") as buffer:
             while chunk := await file.read(8192):
