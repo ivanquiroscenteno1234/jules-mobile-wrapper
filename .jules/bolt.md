@@ -13,3 +13,6 @@
 ## 2025-04-13 - [Flutter List Rendering Performance]
 **Learning:** In Flutter, rendering large datasets like Git patch diffs using a standard `ListView` with a `map().toList()` pattern instantiates all child widgets at once. This causes massive memory spikes and UI thread jank, especially when nested inside a `DraggableScrollableSheet`.
 **Action:** Always use `ListView.builder` for large lists to ensure lazy widget instantiation, improving rendering performance and avoiding memory limits.
+## 2025-05-18 - [Python Regex Performance]
+**Learning:** In Python, calling `re.findall(pattern, text)` repeatedly inside a frequently called function (like one parsing diffs or logs) forces Python to parse and evaluate the string regex pattern on every invocation, causing unnecessary overhead.
+**Action:** Always extract static regular expressions into module-level variables and pre-compile them using `re.compile(pattern)`. Then, use `.findall(text)` directly on the compiled object to prevent redundant memory allocations and parsing.

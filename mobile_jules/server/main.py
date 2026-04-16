@@ -12,6 +12,12 @@ import google.generativeai as genai
 
 # Compile regular expression to efficiently parse updated files from git diffs
 DIFF_FILE_PATTERN = re.compile(r"^\+\+\+ (?:b/)?([^\t\n].*)", re.MULTILINE)
+
+# Pre-compile regexes for file path extraction to prevent redundant allocations
+BACKTICK_PATTERN = re.compile(r'`([^`]+\.[a-zA-Z]{1,5})`')
+QUOTE_PATTERN = re.compile(r"'([^']+\.[a-zA-Z]{1,5})'")
+COMMON_EXTENSIONS_PATTERN = re.compile(r'\b(\S+\.(?:py|dart|yaml|yml|json|ts|tsx|js|jsx|md|txt|html|css|scss|java|kt|swift|go|rs|rb|php|c|cpp|h|hpp))\b', re.IGNORECASE)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -972,16 +978,13 @@ def extract_files_from_text(text: str, diff_files: List[str] = None) -> List[str
     files = []
     
     # Match backtick-quoted file paths: `path/to/file.ext`
-    backtick_pattern = r'`([^`]+\.[a-zA-Z]{1,5})`'
-    files.extend(re.findall(backtick_pattern, text))
+    files.extend(BACKTICK_PATTERN.findall(text))
     
     # Match single-quoted file paths: 'path/to/file.ext'
-    quote_pattern = r"'([^']+\.[a-zA-Z]{1,5})'"
-    files.extend(re.findall(quote_pattern, text))
+    files.extend(QUOTE_PATTERN.findall(text))
     
     # Match common file extensions without quotes: path/to/file.ext
-    common_extensions = r'\b(\S+\.(?:py|dart|yaml|yml|json|ts|tsx|js|jsx|md|txt|html|css|scss|java|kt|swift|go|rs|rb|php|c|cpp|h|hpp))\b'
-    files.extend(re.findall(common_extensions, text, re.IGNORECASE))
+    files.extend(COMMON_EXTENSIONS_PATTERN.findall(text))
     
     # Deduplicate while preserving order
     seen = set()
