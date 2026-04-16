@@ -1791,7 +1791,7 @@ async def speech_to_text(file: UploadFile = File(...)):
             while chunk := await file.read(8192):
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
-                    raise HTTPException(status_code=413, detail="File too large. Maximum size is 25MB.")
+                    raise HTTPException(status_code=413, detail="File too large (exceeds 25MB limit)")
                 buffer.write(chunk)
         
         # Using Gemini 3 Flash with thinking_level="medium"
@@ -1821,10 +1821,10 @@ async def speech_to_text(file: UploadFile = File(...)):
         
         return {"text": response.text.strip()}
     
-    except HTTPException:
+    except HTTPException as he:
         if 'temp_filename' in locals() and os.path.exists(temp_filename):
             os.remove(temp_filename)
-        raise
+        raise he
     except Exception as e:
         print(f"STT Error: {e}")
         if 'temp_filename' in locals() and os.path.exists(temp_filename):
