@@ -8,6 +8,10 @@
 **Learning:** This occurred because the endpoints attempted a universal catch-all for exception handling without differentiating between expected HTTP Exceptions and unexpected system exceptions.
 **Prevention:** In FastAPI applications, always catch `HTTPException` first and re-raise it to let FastAPI handle structured responses natively. Then catch generic `Exception`, log it securely on the server-side, and return a sanitized, generic error message (e.g., "An internal server error occurred.") to the client. Never expose raw `Exception` details directly via API endpoints.
 
+## 2026-04-14 - [Memory Exhaustion / DoS in File Upload endpoint]
+**Vulnerability:** The FastAPI `/stt` endpoint was using `await file.read()` which reads the entire uploaded file into memory at once, and lacked any file size limits. This allowed an attacker to send an infinitely large file, causing the server to exhaust memory (OOM crash) or disk space, leading to Denial of Service (DoS).
+**Learning:** By default, FastAPI's `UploadFile` parses files into memory up to a point (spooled), but explicitly calling `.read()` with no arguments loads the entire contents into RAM regardless of size.
+**Prevention:** Always read uploaded files in fixed-size chunks (e.g. `await file.read(8192)`) and enforce a strict hard-limit `MAX_FILE_SIZE`. If the limit is exceeded, cleanly delete the temporary artifact and raise a `413 Payload Too Large` error.
 ## 2024-05-24 - [Fix plaintext password leak in unauthenticated API endpoint]
 **Vulnerability:** The `/credentials/{credential_id}` GET endpoint in the FastAPI backend (`mobile_jules/server/main.py`) returned decrypted plaintext passwords without requiring authentication. Additionally, the Flutter client retrieved these plaintext credentials over the network to include them in the POST payload to start tests.
 **Learning:** Returning plaintext credentials to a client, especially unauthenticated, is a severe security risk. Operations requiring secrets should decrypt them securely on the backend, only when necessary, and avoid transmitting them back to the client.
