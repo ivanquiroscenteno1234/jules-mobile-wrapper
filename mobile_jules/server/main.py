@@ -17,6 +17,7 @@ DIFF_FILE_PATTERN = re.compile(r"^\+\+\+ (?:b/)?([^\t\n].*)", re.MULTILINE)
 BACKTICK_PATTERN = re.compile(r'`([^`]+\.[a-zA-Z]{1,5})`')
 QUOTE_PATTERN = re.compile(r"'([^']+\.[a-zA-Z]{1,5})'")
 COMMON_EXTENSIONS_PATTERN = re.compile(r'\b(\S+\.(?:py|dart|yaml|yml|json|ts|tsx|js|jsx|md|txt|html|css|scss|java|kt|swift|go|rs|rb|php|c|cpp|h|hpp))\b', re.IGNORECASE)
+GITHUB_PR_URL_PATTERN = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -370,8 +371,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
         if pr_url:
             print(f"🔍 Using provided PR URL: {pr_url}", flush=True)
             try:
-                import re
-                match = re.match(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
+                match = GITHUB_PR_URL_PATTERN.match(pr_url)
                 if match:
                     pr_owner, pr_repo, pr_number = match.groups()
                     github_client = get_github_client()
@@ -427,8 +427,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                 print(f"🔍 Trying to fetch diff from PR: {pr_url}", flush=True)
                 try:
                     # Parse PR URL: https://github.com/{owner}/{repo}/pull/{number}
-                    import re
-                    match = re.match(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
+                    match = GITHUB_PR_URL_PATTERN.match(pr_url)
                     if match:
                         pr_owner, pr_repo, pr_number = match.groups()
                         github_client = get_github_client()
