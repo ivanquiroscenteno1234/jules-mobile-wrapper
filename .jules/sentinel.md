@@ -21,3 +21,8 @@
 **Vulnerability:** The `/stt` endpoint read the entire uploaded file into memory at once using `await file.read()`. This could lead to a Denial of Service (DoS) through memory exhaustion if an attacker uploaded a very large file.
 **Learning:** In asynchronous applications like FastAPI, reading large files directly into memory blocks the event loop and rapidly consumes server resources.
 **Prevention:** Always read uploaded files in chunks (`await file.read(8192)`) within a `while` loop. Additionally, enforce a maximum file size limit (e.g., 25MB) during the chunking process, raising an `HTTPException` with status code 413 (Payload Too Large) if the limit is exceeded. Ensure any temporary files are cleaned up in an exception block if the upload is aborted.
+
+## 2024-05-24 - [Fix silent fallback to plaintext passwords]
+**Vulnerability:** If the `cryptography` dependency was missing, the server would catch the `ImportError` and silently fallback to storing user passwords in plaintext without raising any alerts.
+**Learning:** Security controls should never silently fail open. If a dependency required for a critical security function (like password encryption) is missing, the application should fail to start or throw a hard error rather than proceeding insecurely.
+**Prevention:** Remove `try-except ImportError` blocks around critical security dependencies. Ensure security variables (like `cipher_suite`) are always required, and make the application fail closed if initialization is impossible.

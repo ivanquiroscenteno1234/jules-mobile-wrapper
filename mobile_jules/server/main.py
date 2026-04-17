@@ -114,19 +114,15 @@ def get_encryption_key():
             f.write(key)
         return key
 
-try:
-    from cryptography.fernet import Fernet
-    cipher_suite = Fernet(get_encryption_key())
-except ImportError:
-    print("Warning: 'cryptography' not installed. Password encryption disabled.")
-    cipher_suite = None
+from cryptography.fernet import Fernet
+cipher_suite = Fernet(get_encryption_key())
 
 def encrypt_password(password: str) -> str:
-    if not password or not cipher_suite: return password
+    if not password: return password
     return cipher_suite.encrypt(password.encode()).decode()
 
 def decrypt_password(token: str) -> str:
-    if not token or not cipher_suite: return token
+    if not token: return token
     try:
         return cipher_suite.decrypt(token.encode()).decode()
     except:
