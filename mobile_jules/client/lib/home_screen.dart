@@ -60,7 +60,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       setState(() {
-        error = 'Error connecting to server: $e\n\nMake sure python server is running!';
+        error =
+            'Error connecting to server: $e\n\nMake sure python server is running!';
         isLoading = false;
       });
     }
@@ -78,9 +79,11 @@ class _HomeScreenState extends State<HomeScreen> {
         final lowerQuery = query.toLowerCase();
         setState(() {
           _filteredRepos = repos
-              .where((repo) =>
-                  repo['name'].toLowerCase().contains(lowerQuery) ||
-                  repo['full_name'].toLowerCase().contains(lowerQuery))
+              .where(
+                (repo) =>
+                    repo['name'].toLowerCase().contains(lowerQuery) ||
+                    repo['full_name'].toLowerCase().contains(lowerQuery),
+              )
               .toList();
         });
       }
@@ -106,10 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(color: Colors.black87),
                   onChanged: _filterRepos,
                 )
-              : const Text(
-                  'Mobile Jules',
-                  key: ValueKey('titleText'),
-                ),
+              : const Text('Mobile Jules', key: ValueKey('titleText')),
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
@@ -196,160 +196,213 @@ class _HomeScreenState extends State<HomeScreen> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-              ? Center(
-                  child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(error!, style: const TextStyle(color: Colors.red)),
-                ))
-              : Column(
-                  children: [
-                    // Automation Mode Toggle
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: _buildGlassCard(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Colors.deepPurple.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+            )
+          : Column(
+              children: [
+                // Automation Mode Toggle
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: _buildGlassCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.deepPurple.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.auto_mode,
+                            color: Colors.deepPurple,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Auto Mode',
+                                style: TextStyle(fontWeight: FontWeight.bold),
                               ),
-                              child: const Icon(Icons.auto_mode, color: Colors.deepPurple),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Auto Mode',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                  Text(
-                                    AppConfig.autoMode
-                                        ? 'Auto-approve plans & create PRs'
-                                        : 'Manual plan approval',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                                  ),
-                                ],
+                              Text(
+                                AppConfig.autoMode
+                                    ? 'Auto-approve plans & create PRs'
+                                    : 'Manual plan approval',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
                               ),
-                            ),
-                            Switch(
-                              value: AppConfig.autoMode,
-                              onChanged: (value) {
-                                setState(() {
-                                  AppConfig.autoMode = value;
-                                });
-                              },
-                              activeColor: Colors.deepPurple,
-                            ),
-                          ],
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: AppConfig.autoMode,
+                          onChanged: (value) {
+                            setState(() {
+                              AppConfig.autoMode = value;
+                            });
+                          },
+                          activeColor: Colors.deepPurple,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Section Title
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.folder,
+                        color: Colors.deepPurple,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Your Repositories',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
-                    
-                    // Section Title
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.folder, color: Colors.deepPurple, size: 20),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Your Repositories',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${_filteredRepos.length}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.deepPurple,
                           ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.deepPurple.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              '${_filteredRepos.length}',
-                              style: const TextStyle(
-                                fontSize: 12, 
-                                fontWeight: FontWeight.bold,
-                                color: Colors.deepPurple
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                    
-                    // Repos List
-                    Expanded(
-                      child: _filteredRepos.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.folder_off, size: 64, color: Colors.grey[400]),
-                                const SizedBox(height: 16),
-                                Text(
-                                  _isSearching ? 'No repositories match your search' : 'No repositories found',
-                                  style: TextStyle(color: Colors.grey[600], fontSize: 16),
-                                ),
-                                if (!_isSearching) ...[
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Create a new task to get started',
-                                    style: TextStyle(color: Colors.grey[500], fontSize: 14),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 80, top: 8),
-                            itemCount: _filteredRepos.length,
-                            itemBuilder: (context, index) {
-                              final repo = _filteredRepos[index];
-                              return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                            child: _buildGlassCard(
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                                leading: Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.deepPurple.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: const Icon(Icons.code, color: Colors.deepPurple, size: 24),
-                                ),
-                                title: Text(
-                                  repo['name'],
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                subtitle: Text(
-                                  repo['full_name'],
-                                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                                ),
-                                trailing: const Icon(Icons.chevron_right, color: Colors.deepPurple),
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => ChatScreen(
-                                        repoName: repo['name'],
-                                        sourceId: repo['id'],
-                                      ),
-                                    ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+
+                // Repos List
+                Expanded(
+                  child: _filteredRepos.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.folder_off,
+                                size: 64,
+                                color: Colors.grey[400],
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _isSearching
+                                    ? 'No repositories match your search'
+                                    : 'No repositories found',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 16,
+                                ),
+                              ),
+                              if (!_isSearching) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Create a new task to get started',
+                                  style: TextStyle(
+                                    color: Colors.grey[500],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 80, top: 8),
+                          itemCount: _filteredRepos.length,
+                          itemBuilder: (context, index) {
+                            final repo = _filteredRepos[index];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              child: _buildGlassCard(
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 4,
+                                  ),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.deepPurple.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.code,
+                                      color: Colors.deepPurple,
+                                      size: 24,
+                                    ),
+                                  ),
+                                  title: Text(
+                                    repo['name'],
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    repo['full_name'],
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  trailing: const Icon(
+                                    Icons.chevron_right,
+                                    color: Colors.deepPurple,
+                                  ),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => ChatScreen(
+                                          repoName: repo['name'],
+                                          sourceId: repo['id'],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showNewTaskDialog,
         icon: const Icon(Icons.add),
@@ -365,14 +418,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: isDark 
-          ? Colors.white.withOpacity(0.07) 
-          : Colors.white.withOpacity(0.8),
+        color: isDark
+            ? Colors.white.withOpacity(0.07)
+            : Colors.white.withOpacity(0.8),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark 
-            ? Colors.white.withOpacity(0.12) 
-            : Colors.deepPurple.withOpacity(0.15),
+          color: isDark
+              ? Colors.white.withOpacity(0.12)
+              : Colors.deepPurple.withOpacity(0.15),
           width: 0.5,
         ),
         boxShadow: [
@@ -397,13 +450,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final TextEditingController promptController = TextEditingController();
     final TextEditingController repoNameController = TextEditingController();
     bool noCodebase = false;
-    bool autoCreatePR = false;  // Auto-create PR toggle
-    bool isPrivateRepo = false;  // Private repo toggle for No Codebase
-    bool isCreatingRepo = false;  // Loading state for repo creation
-    String? createRepoError;  // Error message for repo creation
+    bool autoCreatePR = false; // Auto-create PR toggle
+    bool isPrivateRepo = false; // Private repo toggle for No Codebase
+    bool isCreatingRepo = false; // Loading state for repo creation
+    String? createRepoError; // Error message for repo creation
     String? selectedRepoId;
     String? selectedRepoName;
-    
+
     showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -420,7 +473,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Task Prompt
-                  const Text('What would you like Jules to do?', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                    'What would you like Jules to do?',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: promptController,
@@ -429,13 +485,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     keyboardType: TextInputType.multiline,
                     textInputAction: TextInputAction.newline,
                     decoration: const InputDecoration(
-                      hintText: 'e.g., Create a Flask app with user authentication...',
+                      hintText:
+                          'e.g., Create a Flask app with user authentication...',
                       border: OutlineInputBorder(),
                     ),
-                    onChanged: (_) => setDialogState(() {}),  // Rebuild to update button state
+                    onChanged: (_) =>
+                        setDialogState(() {}), // Rebuild to update button state
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // No Codebase Toggle (DISABLED - Coming Soon)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -444,14 +502,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         const Text('No Codebase'),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange[100],
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             'Coming Soon',
-                            style: TextStyle(fontSize: 10, color: Colors.orange[800], fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.orange[800],
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ],
@@ -461,10 +526,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                     ),
                     value: false,
-                    onChanged: null,  // Disabled
+                    onChanged: null, // Disabled
                     activeColor: Colors.deepPurple,
                   ),
-                  
+
                   // No Codebase: Show repo creation options
                   if (noCodebase) ...[
                     const SizedBox(height: 8),
@@ -480,7 +545,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.auto_awesome, color: Colors.deepPurple[700], size: 20),
+                              Icon(
+                                Icons.auto_awesome,
+                                color: Colors.deepPurple[700],
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 'Auto-Create GitHub Repository',
@@ -492,7 +561,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          const Text('Repository Name', style: TextStyle(fontWeight: FontWeight.w500)),
+                          const Text(
+                            'Repository Name',
+                            style: TextStyle(fontWeight: FontWeight.w500),
+                          ),
                           const SizedBox(height: 4),
                           TextField(
                             controller: repoNameController,
@@ -511,13 +583,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(height: 8),
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('Private Repository', style: TextStyle(fontSize: 14)),
+                            title: const Text(
+                              'Private Repository',
+                              style: TextStyle(fontSize: 14),
+                            ),
                             subtitle: Text(
-                              isPrivateRepo ? 'Only you can see this repository' : 'Anyone can see this repository',
-                              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                              isPrivateRepo
+                                  ? 'Only you can see this repository'
+                                  : 'Anyone can see this repository',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
                             ),
                             value: isPrivateRepo,
-                            onChanged: isCreatingRepo ? null : (value) => setDialogState(() => isPrivateRepo = value),
+                            onChanged: isCreatingRepo
+                                ? null
+                                : (value) => setDialogState(
+                                    () => isPrivateRepo = value,
+                                  ),
                             activeColor: Colors.deepPurple,
                             dense: true,
                           ),
@@ -525,11 +609,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ],
-                  
+
                   // Repo Selection (only if noCodebase is false)
                   if (!noCodebase) ...[
                     const SizedBox(height: 8),
-                    const Text('Repository', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Repository',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 4),
                     DropdownButtonFormField<String>(
                       value: selectedRepoId,
@@ -537,7 +624,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       hint: const Text('Select a repository'),
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
                       ),
                       selectedItemBuilder: (BuildContext context) {
                         return repos.map<Widget>((repo) {
@@ -551,18 +641,24 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         }).toList();
                       },
-                      items: repos.map((repo) => DropdownMenuItem<String>(
-                        value: repo['id'],
-                        child: Text(
-                          repo['full_name'],
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      )).toList(),
+                      items: repos
+                          .map(
+                            (repo) => DropdownMenuItem<String>(
+                              value: repo['id'],
+                              child: Text(
+                                repo['full_name'],
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (value) {
                         setDialogState(() {
                           selectedRepoId = value;
-                          selectedRepoName = repos.firstWhere((r) => r['id'] == value)['name'];
+                          selectedRepoName = repos.firstWhere(
+                            (r) => r['id'] == value,
+                          )['name'];
                         });
                       },
                     ),
@@ -572,9 +668,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Auto-Create PR'),
                       subtitle: Text(
-                        autoCreatePR 
-                          ? 'Automatically create a pull request when done' 
-                          : 'Manual PR creation after completion',
+                        autoCreatePR
+                            ? 'Automatically create a pull request when done'
+                            : 'Manual PR creation after completion',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                       value: autoCreatePR,
@@ -592,107 +688,135 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: isCreatingRepo ? null : () => Navigator.pop(dialogContext),
+              onPressed: isCreatingRepo
+                  ? null
+                  : () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: (promptController.text.trim().isEmpty || 
-                         (!noCodebase && selectedRepoId == null) ||
-                         (noCodebase && repoNameController.text.trim().isEmpty) ||
-                         isCreatingRepo)
-                ? null
-                : () async {
-                    if (noCodebase && repoNameController.text.trim().isNotEmpty) {
-                      // Create GitHub repo first
-                      setDialogState(() {
-                        isCreatingRepo = true;
-                        createRepoError = null;
-                      });
-                      
-                      try {
-                        final response = await http.post(
-                          Uri.parse('${AppConfig.serverUrl}/github/repos'),
-                          headers: {
-                            'ngrok-skip-browser-warning': 'true',
-                            'Content-Type': 'application/json',
-                          },
-                          body: jsonEncode({
-                            'name': repoNameController.text.trim(),
-                            'description': promptController.text.trim().substring(
-                              0, 
-                              promptController.text.trim().length > 100 ? 100 : promptController.text.trim().length
-                            ),
-                            'private': isPrivateRepo,
-                          }),
-                        );
-                        
-                        if (response.statusCode == 200) {
-                          final data = jsonDecode(response.body);
-                          Navigator.pop(dialogContext);
-                          
-                          // Show success message
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Repository "${data['name']}" created!'),
-                                backgroundColor: Colors.green,
-                                duration: const Duration(seconds: 2),
+              onPressed:
+                  (promptController.text.trim().isEmpty ||
+                      (!noCodebase && selectedRepoId == null) ||
+                      (noCodebase && repoNameController.text.trim().isEmpty) ||
+                      isCreatingRepo)
+                  ? null
+                  : () async {
+                      if (noCodebase &&
+                          repoNameController.text.trim().isNotEmpty) {
+                        // Create GitHub repo first
+                        setDialogState(() {
+                          isCreatingRepo = true;
+                          createRepoError = null;
+                        });
+
+                        try {
+                          final response = await http.post(
+                            Uri.parse('${AppConfig.serverUrl}/github/repos'),
+                            headers: {
+                              'ngrok-skip-browser-warning': 'true',
+                              'Content-Type': 'application/json',
+                            },
+                            body: jsonEncode({
+                              'name': repoNameController.text.trim(),
+                              'description': promptController.text
+                                  .trim()
+                                  .substring(
+                                    0,
+                                    promptController.text.trim().length > 100
+                                        ? 100
+                                        : promptController.text.trim().length,
+                                  ),
+                              'private': isPrivateRepo,
+                            }),
+                          );
+
+                          if (response.statusCode == 200) {
+                            final data = jsonDecode(response.body);
+                            Navigator.pop(dialogContext);
+
+                            // Show success message
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Repository "${data['name']}" created!',
+                                  ),
+                                  backgroundColor: Colors.green,
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            }
+
+                            // Navigate to ChatScreen with the new repo name (repoless mode)
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatScreen(
+                                  repoName:
+                                      data['name'] ??
+                                      repoNameController.text.trim(),
+                                  sourceId: null, // Still repoless for Jules
+                                  initialPrompt: promptController.text.trim(),
+                                  autoMode: false,
+                                ),
                               ),
                             );
+                          } else {
+                            final errorData = jsonDecode(response.body);
+                            setDialogState(() {
+                              isCreatingRepo = false;
+                              createRepoError =
+                                  errorData['detail'] ??
+                                  'Failed to create repository';
+                            });
                           }
-                          
-                          // Navigate to ChatScreen with the new repo name (repoless mode)
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ChatScreen(
-                                repoName: data['name'] ?? repoNameController.text.trim(),
-                                sourceId: null,  // Still repoless for Jules
-                                initialPrompt: promptController.text.trim(),
-                                autoMode: false,
-                              ),
-                            ),
-                          );
-                        } else {
-                          final errorData = jsonDecode(response.body);
+                        } catch (e) {
                           setDialogState(() {
                             isCreatingRepo = false;
-                            createRepoError = errorData['detail'] ?? 'Failed to create repository';
+                            createRepoError = 'Error: $e';
                           });
                         }
-                      } catch (e) {
-                        setDialogState(() {
-                          isCreatingRepo = false;
-                          createRepoError = 'Error: $e';
-                        });
-                      }
-                    } else {
-                      // Normal flow: existing repo or truly repoless
-                      Navigator.pop(dialogContext);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ChatScreen(
-                            repoName: noCodebase ? 'New Project' : (selectedRepoName ?? 'Project'),
-                            sourceId: noCodebase ? null : selectedRepoId,
-                            initialPrompt: promptController.text.trim(),
-                            autoMode: autoCreatePR,
+                      } else {
+                        // Normal flow: existing repo or truly repoless
+                        Navigator.pop(dialogContext);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatScreen(
+                              repoName: noCodebase
+                                  ? 'New Project'
+                                  : (selectedRepoName ?? 'Project'),
+                              sourceId: noCodebase ? null : selectedRepoId,
+                              initialPrompt: promptController.text.trim(),
+                              autoMode: autoCreatePR,
+                            ),
                           ),
-                        ),
-                      );
-                    }
-                  },
+                        );
+                      }
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.deepPurple,
                 foregroundColor: Colors.white,
               ),
-              child: isCreatingRepo 
-                ? const SizedBox(
-                    width: 20, 
-                    height: 20, 
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
-                  )
-                : Text(noCodebase && repoNameController.text.trim().isNotEmpty ? 'Create & Start' : 'Start'),
+              child: isCreatingRepo
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(
+                      promptController.text.trim().isEmpty
+                          ? 'Enter prompt'
+                          : (!noCodebase && selectedRepoId == null)
+                          ? 'Select repository'
+                          : (noCodebase &&
+                                repoNameController.text.trim().isEmpty)
+                          ? 'Enter repo name'
+                          : (noCodebase ? 'Create & Start' : 'Start'),
+                    ),
             ),
           ],
         ),
@@ -700,11 +824,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-
   void _showSettingsDialog() {
-    final TextEditingController urlController = TextEditingController(text: AppConfig.serverUrl);
+    final TextEditingController urlController = TextEditingController(
+      text: AppConfig.serverUrl,
+    );
     bool localDarkMode = AppConfig.darkMode;
-    
+
     showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -715,17 +840,20 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Server URL
-              const Text('Server URL:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text(
+                'Server URL:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 4),
               TextField(
                 controller: urlController,
                 decoration: const InputDecoration(hintText: 'http://...'),
               ),
-              
+
               const SizedBox(height: 16),
               const Divider(),
               const SizedBox(height: 8),
-              
+
               // Dark Mode Toggle
               Row(
                 children: [
@@ -755,19 +883,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 setState(() {
                   AppConfig.serverUrl = urlController.text.trim();
                   if (AppConfig.serverUrl.endsWith('/')) {
-                    AppConfig.serverUrl = AppConfig.serverUrl.substring(0, AppConfig.serverUrl.length - 1);
+                    AppConfig.serverUrl = AppConfig.serverUrl.substring(
+                      0,
+                      AppConfig.serverUrl.length - 1,
+                    );
                   }
                   AppConfig.darkMode = localDarkMode;
                   isLoading = true;
                   error = null;
                 });
-                
+
                 // Apply theme
                 MyApp.setThemeMode(
-                  context, 
+                  context,
                   localDarkMode ? ThemeMode.dark : ThemeMode.light,
                 );
-                
+
                 Navigator.pop(dialogContext);
                 fetchRepos();
               },
