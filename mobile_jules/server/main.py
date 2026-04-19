@@ -1709,6 +1709,10 @@ async def get_repo_presets(owner: str, repo: str):
     full_name = f"{owner}/{repo}"
     data = _load_presets()
     repo_presets = [p for p in data.get("presets", []) if p.get("repository_full_name") == full_name]
+    # Redact passwords before sending to client
+    for preset in repo_presets:
+        if "password" in preset:
+            preset["password"] = None
     return {"presets": repo_presets}
 
 @app.post("/repos/{owner}/{repo}/presets")
@@ -1723,7 +1727,7 @@ async def create_preset(owner: str, repo: str, preset: TestPreset):
         "url": preset.url,
         "objective": preset.objective,
         "username": preset.username,
-        "password": preset.password,
+        "password": encrypt_password(preset.password) if preset.password else None,
         "repository_full_name": full_name
     }
     
@@ -1749,6 +1753,10 @@ async def delete_preset(preset_id: str):
 async def list_all_presets():
     """List all test presets."""
     data = _load_presets()
+    # Redact passwords before sending to client
+    for preset in data.get("presets", []):
+        if "password" in preset:
+            preset["password"] = None
     return data
 
 @app.post("/test/{test_id}/save-as-preset")
