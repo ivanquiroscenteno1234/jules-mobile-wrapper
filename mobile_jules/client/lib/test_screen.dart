@@ -927,6 +927,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                   labelText: 'Preset Title',
                   hintText: 'e.g., Login Flow',
                 ),
+                onChanged: (_) => setDialogState(() {}),
               ),
               const SizedBox(height: 16),
               const Text('Repository', style: TextStyle(fontSize: 12, color: Colors.grey)),
@@ -960,7 +961,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: (selectedRepo == null || isSaving) 
+              onPressed: (titleController.text.trim().isEmpty || selectedRepo == null || isSaving)
                 ? null 
                 : () async {
                     setDialogState(() => isSaving = true);
@@ -997,7 +998,13 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                       valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                     ),
                   )
-                : const Text('Save'),
+                : Text(
+                    titleController.text.trim().isEmpty
+                        ? 'Enter title'
+                        : selectedRepo == null
+                            ? 'Select repo'
+                            : 'Save',
+                  ),
             ),
           ],
         ),
