@@ -274,8 +274,8 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
             
             # Add image if available
             if screenshot_b64:
-                image_data = base64.b64decode(screenshot_b64)
-                image = Image.open(io.BytesIO(image_data))
+                image_data = await asyncio.to_thread(base64.b64decode, screenshot_b64)
+                image = await asyncio.to_thread(Image.open, io.BytesIO(image_data))
                 contents.append(image)
             
             # Call generate_content with ThinkingConfig
@@ -437,8 +437,8 @@ Respond with ONLY a JSON object:
             # Add screenshot if available
             if screenshot_b64 and self.use_screenshots:
                 try:
-                    img_data = base64.b64decode(screenshot_b64)
-                    img = Image.open(io.BytesIO(img_data))
+                    img_data = await asyncio.to_thread(base64.b64decode, screenshot_b64)
+                    img = await asyncio.to_thread(Image.open, io.BytesIO(img_data))
                     contents.append(img)
                 except:
                     pass
