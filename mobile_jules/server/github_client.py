@@ -271,9 +271,11 @@ class GitHubClient:
                         )
                         if content_resp.status_code == 200:
                             import base64
-                            current_content = base64.b64decode(
-                                content_resp.json()["content"]
-                            ).decode("utf-8")
+                            import asyncio
+                            decoded_bytes = await asyncio.to_thread(
+                                base64.b64decode, content_resp.json()["content"]
+                            )
+                            current_content = decoded_bytes.decode("utf-8")
                             new_content = self._apply_patch_to_content(
                                 current_content, changes
                             )
