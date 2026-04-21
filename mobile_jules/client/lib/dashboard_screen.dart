@@ -43,12 +43,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final sessions = data['sessions'] as List? ?? [];
-        
+
         int active = 0;
         int waiting = 0;
         int completed = 0;
         int withPRs = 0;
-        
+
         for (var session in sessions) {
           final state = (session['state'] ?? '').toString().toUpperCase();
           switch (state) {
@@ -61,20 +61,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               break;
             case 'DONE':
               completed++;
-              if (session['outputs'] != null && (session['outputs'] as List).isNotEmpty) {
+              if (session['outputs'] != null &&
+                  (session['outputs'] as List).isNotEmpty) {
                 withPRs++;
               }
               break;
           }
         }
-        
+
         setState(() {
           totalSessions = sessions.length;
           activeSessions = active;
           waitingSessions = waiting;
           completedSessions = completed;
           sessionsWithPRs = withPRs;
-          recentSessions = sessions.take(5).cast<Map<String, dynamic>>().toList();
+          recentSessions = sessions
+              .take(5)
+              .cast<Map<String, dynamic>>()
+              .toList();
           isLoading = false;
         });
       } else {
@@ -108,168 +112,204 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-              ? Center(child: Text(error!, style: const TextStyle(color: Colors.red)))
-              : RefreshIndicator(
-                  onRefresh: fetchDashboardData,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+          ? Center(
+              child: Text(error!, style: const TextStyle(color: Colors.red)),
+            )
+          : RefreshIndicator(
+              onRefresh: fetchDashboardData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Stats Grid
+                    // Using Column and Rows instead of GridView with shrinkWrap to avoid layout rounding bugs
+                    Column(
                       children: [
-                        // Stats Grid
-                        // Using Column and Rows instead of GridView with shrinkWrap to avoid layout rounding bugs
-                        Column(
+                        Row(
                           children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: AspectRatio(
-                                    aspectRatio: 1.5,
-                                    child: _buildStatCard(
-                                      'Active',
-                                      activeSessions.toString(),
-                                      Icons.code,
-                                      Colors.orange,
-                                    ),
-                                  ),
+                            Expanded(
+                              child: AspectRatio(
+                                aspectRatio: 1.5,
+                                child: _buildStatCard(
+                                  'Active',
+                                  activeSessions.toString(),
+                                  Icons.code,
+                                  Colors.orange,
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: AspectRatio(
-                                    aspectRatio: 1.5,
-                                    child: _buildStatCard(
-                                      'Waiting',
-                                      waitingSessions.toString(),
-                                      Icons.pending_actions,
-                                      Colors.amber,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: AspectRatio(
-                                    aspectRatio: 1.5,
-                                    child: _buildStatCard(
-                                      'Completed',
-                                      completedSessions.toString(),
-                                      Icons.check_circle,
-                                      Colors.green,
-                                    ),
-                                  ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: AspectRatio(
+                                aspectRatio: 1.5,
+                                child: _buildStatCard(
+                                  'Waiting',
+                                  waitingSessions.toString(),
+                                  Icons.pending_actions,
+                                  Colors.amber,
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: AspectRatio(
-                                    aspectRatio: 1.5,
-                                    child: _buildStatCard(
-                                      'PRs Created',
-                                      sessionsWithPRs.toString(),
-                                      Icons.merge,
-                                      Colors.purple,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ],
-                        ),
-                        
-                        const SizedBox(height: 24),
-                        
-                        // Quick Actions
-                        const Text(
-                          'Quick Actions',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 12),
                         Row(
                           children: [
                             Expanded(
-                              child: _buildActionButton(
-                                'View All Sessions',
-                                Icons.list,
-                                () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => const SessionsScreen()),
+                              child: AspectRatio(
+                                aspectRatio: 1.5,
+                                child: _buildStatCard(
+                                  'Completed',
+                                  completedSessions.toString(),
+                                  Icons.check_circle,
+                                  Colors.green,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: AspectRatio(
+                                aspectRatio: 1.5,
+                                child: _buildStatCard(
+                                  'PRs Created',
+                                  sessionsWithPRs.toString(),
+                                  Icons.merge,
+                                  Colors.purple,
                                 ),
                               ),
                             ),
                           ],
                         ),
-                        
-                        if (waitingSessions > 0) ...[
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.amber[50],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.amber),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.warning_amber, color: Colors.amber),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    '$waitingSessions session(s) waiting for your input',
-                                    style: const TextStyle(fontWeight: FontWeight.w500),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (_) => const SessionsScreen()),
-                                  ),
-                                  child: const Text('View'),
-                                ),
-                              ],
+                      ],
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Quick Actions
+                    const Text(
+                      'Quick Actions',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildActionButton(
+                            'View All Sessions',
+                            Icons.list,
+                            () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const SessionsScreen(),
+                              ),
                             ),
                           ),
-                        ],
-                        
-                        const SizedBox(height: 24),
-                        
-                        // Recent Sessions
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ),
+                      ],
+                    ),
+
+                    if (waitingSessions > 0) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.amber[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber),
+                        ),
+                        child: Row(
                           children: [
-                            const Text(
-                              'Recent Sessions',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            const Icon(
+                              Icons.warning_amber,
+                              color: Colors.amber,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '$waitingSessions session(s) waiting for your input',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                             ),
                             TextButton(
                               onPressed: () => Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const SessionsScreen()),
+                                MaterialPageRoute(
+                                  builder: (_) => const SessionsScreen(),
+                                ),
                               ),
-                              child: const Text('See All'),
+                              child: const Text('View'),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        if (recentSessions.isEmpty)
-                          const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(32),
-                              child: Text('No sessions yet', style: TextStyle(color: Colors.grey)),
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+
+                    // Recent Sessions
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Recent Sessions',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SessionsScreen(),
                             ),
-                          )
-                        else
-                          ...recentSessions.map((s) => _buildSessionTile(s)).toList(),
+                          ),
+                          child: const Text('See All'),
+                        ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    if (recentSessions.isEmpty)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.inbox, size: 48, color: Colors.grey),
+                              SizedBox(height: 12),
+                              Text(
+                                'No sessions yet',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ...recentSessions
+                          .map((s) => _buildSessionTile(s))
+                          .toList(),
+                  ],
                 ),
+              ),
+            ),
     );
   }
 
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Card(
       elevation: 2,
       child: Container(
@@ -301,17 +341,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(color: Colors.grey[600]),
-            ),
+            Text(label, style: TextStyle(color: Colors.grey[600])),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildActionButton(String label, IconData icon, VoidCallback onPressed) {
+  Widget _buildActionButton(
+    String label,
+    IconData icon,
+    VoidCallback onPressed,
+  ) {
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon),
@@ -327,10 +368,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildSessionTile(Map<String, dynamic> session) {
     final state = (session['state'] ?? '').toString().toUpperCase();
     final title = session['title'] ?? 'Untitled';
-    
+
     Color statusColor;
     IconData statusIcon;
-    
+
     switch (state) {
       case 'PLANNING':
         statusColor = Colors.blue;
@@ -352,7 +393,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         statusColor = Colors.grey;
         statusIcon = Icons.help_outline;
     }
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
