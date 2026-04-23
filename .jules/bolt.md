@@ -16,3 +16,6 @@
 ## 2025-05-18 - [Python Regex Performance]
 **Learning:** In Python, calling `re.findall(pattern, text)` repeatedly inside a frequently called function (like one parsing diffs or logs) forces Python to parse and evaluate the string regex pattern on every invocation, causing unnecessary overhead.
 **Action:** Always extract static regular expressions into module-level variables and pre-compile them using `re.compile(pattern)`. Then, use `.findall(text)` directly on the compiled object to prevent redundant memory allocations and parsing.
+## 2024-04-23 - Avoid redundant O(N) string splits in Flutter build methods
+**Learning:** Redundant calls to `.split('\n')` on large strings (like git diffs) within Flutter `build` methods or widget rendering loops can cause severe memory allocations and UI thread jank, as each call allocates a brand new list of strings.
+**Action:** Always cache the result of `.split()` in a local variable if the resulting list or its length is needed multiple times within the same rendering cycle.
