@@ -131,9 +131,8 @@ class _CredsScreenState extends State<CredsScreen> {
                             ? Icons.visibility
                             : Icons.visibility_off,
                       ),
-                      tooltip: obscurePassword
-                          ? 'Show Password'
-                          : 'Hide Password',
+                      tooltip:
+                          obscurePassword ? 'Show Password' : 'Hide Password',
                       onPressed: () => setDialogState(
                         () => obscurePassword = !obscurePassword,
                       ),
@@ -148,21 +147,18 @@ class _CredsScreenState extends State<CredsScreen> {
               onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancel'),
             ),
-            Tooltip(
-              message:
-                  (nameController.text.isEmpty ||
+            ElevatedButton(
+              onPressed: (nameController.text.isEmpty ||
                       usernameController.text.isEmpty ||
                       passwordController.text.isEmpty)
-                  ? 'Please fill all fields'
-                  : 'Save credential',
-              child: ElevatedButton(
-                onPressed:
-                    (nameController.text.isEmpty ||
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: Text(
+                (nameController.text.isEmpty ||
                         usernameController.text.isEmpty ||
                         passwordController.text.isEmpty)
-                    ? null
-                    : () => Navigator.pop(context, true),
-                child: const Text('Save'),
+                    ? 'Fill all fields'
+                    : 'Save',
               ),
             ),
           ],
@@ -341,13 +337,23 @@ class _CredsScreenState extends State<CredsScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
                     if (_selectedRepo == null)
                       const Expanded(
                         child: Center(
-                          child: Text(
-                            'Select a repository to view credentials',
-                            style: TextStyle(color: Colors.grey),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.folder_open,
+                                size: 48,
+                                color: Colors.grey,
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'Select a repository to view credentials',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ],
                           ),
                         ),
                       )
