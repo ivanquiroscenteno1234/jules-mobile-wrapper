@@ -190,7 +190,7 @@ async def list_repos():
             # We want to extract a friendly name
             friendly_name = s.get("githubRepo", {}).get("repo", "Unknown")
             full_name = f"{s.get('githubRepo', {}).get('owner', '')}/{friendly_name}"
-            
+
             repos.append(Repo(
                 name=friendly_name,
                 full_name=full_name,
@@ -220,7 +220,7 @@ async def get_session(session_id: str):
     """Gets a specific session's details including PR outputs."""
     try:
         session = await client.get_session(session_id)
-        
+
         # Extract PR information from outputs if available
         prs = []
         if "outputs" in session:
@@ -232,7 +232,7 @@ async def get_session(session_id: str):
                         "title": pr.get("title"),
                         "description": pr.get("description")
                     })
-        
+
         session["pullRequests"] = prs
         return session
     except HTTPException:
@@ -272,7 +272,7 @@ async def delete_session(session_id: str):
 @app.post("/sessions/{session_id:path}/publish")
 async def publish_branch(session_id: str, create_pr: bool = Query(False)):
     """Publishes the branch (and optionally creates a PR) for a completed session.
-    
+
     Args:
         session_id: The session ID
         create_pr: If True, also creates a pull request
@@ -289,7 +289,7 @@ async def publish_branch(session_id: str, create_pr: bool = Query(False)):
 @app.get("/sessions/{session_id}/patch")
 async def get_session_patch(session_id: str):
     """Returns the patch content for a session (for copying to clipboard).
-    
+
     Args:
         session_id: The session ID
     """
@@ -306,7 +306,7 @@ async def get_session_patch(session_id: str):
         }
     else:
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail="Patch data not found. Session may not have completed or page was refreshed."
         )
 
@@ -356,7 +356,7 @@ def get_repo_info(session: Dict) -> tuple:
 @app.post("/sessions/{session_id}/generate-test")
 async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Query(None)):
     """Generate test steps from a session's code changes.
-    
+
     Priority order:
     1. Use pr_url directly if provided
     2. Extract diff from Jules activities
@@ -367,14 +367,14 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
         # Ensure session_id has proper prefix
         if not session_id.startswith("sessions/"):
             session_id = f"sessions/{session_id}"
-        
+
         # Get session details
         session = await client.get_session(session_id)
-        
+
         diff = ""
         instructions = ""
         file_list = []
-        
+
         # Step 0: Use pr_url directly if provided by client
         if pr_url:
             print(f"🔍 Using provided PR URL: {pr_url}", flush=True)
@@ -389,16 +389,16 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                             print(f"✅ Found diff from provided PR #{pr_number} ({len(diff)} chars)", flush=True)
             except Exception as e:
                 print(f"⚠️ Failed to fetch diff from provided PR: {e}", flush=True)
-        
+
         # Step 1: Try to get diff from activities
         if not diff:
             print(f"🔍 Fetching activities for {session_id}...", flush=True)
             activities = await client.list_activities(session_id, get_all=True)
             diff = extract_diff_from_activities(activities)
-        
+
         if diff:
             print(f"✅ Found diff in activities ({len(diff)} chars)", flush=True)
-        
+
         # Step 2: If no diff from activities, try stored data
         if not diff:
             full_session_id = session_id if session_id.startswith("sessions/") else f"sessions/{session_id}"
@@ -407,7 +407,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                 diff = data.get("patch", "")
                 if diff:
                     print(f"✅ Found diff in stored data ({len(diff)} chars)", flush=True)
-        
+
         # Step 3: If still no diff, try GitHub compare
         if not diff:
             branch = get_jules_branch(session)
@@ -422,7 +422,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                             print(f"✅ Found diff from GitHub ({len(diff)} chars)", flush=True)
                 except Exception as e:
                     print(f"⚠️ GitHub compare failed: {e}", flush=True)
-        
+
         # Step 4: Try to get diff from PR if URL is available in session outputs
         if not diff:
             pr_url = None
@@ -430,7 +430,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                 if "pullRequest" in output:
                     pr_url = output["pullRequest"].get("url")
                     break
-            
+
             if pr_url:
                 print(f"🔍 Trying to fetch diff from PR: {pr_url}", flush=True)
                 try:
@@ -445,13 +445,13 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                                 print(f"✅ Found diff from PR #{pr_number} ({len(diff)} chars)", flush=True)
                 except Exception as e:
                     print(f"⚠️ PR diff fetch failed: {e}", flush=True)
-        
+
         # Get instructions from session for context
         if "userRequest" in session:
             instructions = session["userRequest"].get("text", "")
         title = session.get("title", "")
         context = instructions or title or "Verify the application works correctly"
-        
+
         # Get file list from outputs if available
         if "outputs" in session:
             for output in session["outputs"]:
@@ -459,21 +459,21 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                     pr_info = output.get("pullRequest", {})
                     if "changedFiles" in pr_info:
                         file_list = pr_info["changedFiles"]
-        
+
         # Step 5: If still no diff, inform user
         if not diff and not instructions:
             raise HTTPException(
                 status_code=400,
                 detail="Create a PR or branch first to enable testing."
             )
-        
+
         # Generate test using AI
         result = await tester_agent.generate_test_from_diff(
             diff=diff,
             instructions=context,
             file_list=file_list
         )
-        
+
         return {
             "success": True,
             "test": result,
@@ -513,11 +513,11 @@ async def list_credentials(owner: str, repo: str):
 async def add_credential(owner: str, repo: str, cred: CredentialCreate):
     """Add a new credential for a repository."""
     from datetime import datetime
-    
+
     repo_key = f"{owner}/{repo}"
     if repo_key not in credentials_data:
         credentials_data[repo_key] = []
-    
+
     new_cred = {
         "id": str(uuid.uuid4()),
         "name": cred.name,
@@ -525,10 +525,10 @@ async def add_credential(owner: str, repo: str, cred: CredentialCreate):
         "password": encrypt_password(cred.password),
         "created_at": datetime.now().isoformat()
     }
-    
+
     credentials_data[repo_key].append(new_cred)
     save_credentials(credentials_data)
-    
+
     return {
         "success": True,
         "credential": {
@@ -547,7 +547,7 @@ async def delete_credential(credential_id: str):
                 del credentials_data[repo_key][i]
                 save_credentials(credentials_data)
                 return {"success": True}
-    
+
     raise HTTPException(status_code=404, detail="Credential not found")
 
 @app.get("/repos/{owner}/{repo}/branches")
@@ -556,10 +556,10 @@ async def list_repo_branches(owner: str, repo: str):
     github_client = get_github_client()
     if not github_client:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail="GITHUB_TOKEN not configured."
         )
-    
+
     try:
         branches = await github_client.list_branches(owner, repo)
         return {"branches": branches}
@@ -583,10 +583,10 @@ async def create_github_repo(request: CreateRepoRequest):
     github_client = get_github_client()
     if not github_client:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail="GITHUB_TOKEN not configured. Cannot create repositories."
         )
-    
+
     try:
         repo = await github_client.create_repository(
             name=request.name,
@@ -605,7 +605,7 @@ async def create_github_repo(request: CreateRepoRequest):
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 422:
             raise HTTPException(status_code=422, detail="Repository name already exists or is invalid")
-        raise HTTPException(status_code=e.response.status_code, detail="An error occurred while creating the repository")
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -618,10 +618,10 @@ async def list_github_repos():
     github_client = get_github_client()
     if not github_client:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail="GITHUB_TOKEN not configured."
         )
-    
+
     try:
         repos = await github_client.list_user_repos(per_page=50)
         return {"repos": repos}
@@ -637,10 +637,10 @@ async def delete_github_repo(owner: str, repo: str):
     github_client = get_github_client()
     if not github_client:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail="GITHUB_TOKEN not configured."
         )
-    
+
     try:
         success = await github_client.delete_repository(owner, repo)
         if success:
@@ -661,7 +661,7 @@ async def create_github_pr(
     branch_only: bool = Query(False)
 ):
     """Creates a GitHub branch/PR directly using the stored changeSet data.
-    
+
     Args:
         session_id: The session ID
         base_branch: The target branch to base the PR on (default: main)
@@ -671,17 +671,17 @@ async def create_github_pr(
     github_client = get_github_client()
     if not github_client:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail="GITHUB_TOKEN not configured. Please set the GITHUB_TOKEN environment variable."
         )
-    
+
     # Get the stored changeSet data
     if session_id not in completed_session_data:
         # Try to fetch from session
         try:
             session_data = await client.get_session(session_id)
             activities = await client.list_activities(session_id)
-            
+
             # Find sessionCompleted activity with changeSet
             for activity in reversed(activities):
                 if "sessionCompleted" in activity or "artifacts" in activity:
@@ -699,28 +699,28 @@ async def create_github_pr(
                     break
         except Exception as e:
             print(f"Error fetching session data: {e}")
-    
+
     if session_id not in completed_session_data:
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail="No changeSet data found for this session. The session may not be completed."
         )
-    
+
     data = completed_session_data[session_id]
-    
+
     if not data.get("patch"):
         raise HTTPException(status_code=400, detail="No patch data available for this session.")
-    
+
     # Parse source to get owner/repo
     # Format: sources/github/owner/repo
     source = data["source"]
     parts = source.replace("sources/github/", "").split("/")
     if len(parts) < 2:
         raise HTTPException(status_code=400, detail=f"Invalid source format: {source}")
-    
+
     owner = parts[0]
     repo = parts[1]
-    
+
     try:
         result = await github_client.create_pr_from_patch(
             owner=owner,
@@ -742,7 +742,7 @@ async def create_github_pr(
 # Repoless WebSocket endpoint - no source_id required
 @app.websocket("/chat")
 async def websocket_repoless_endpoint(
-    websocket: WebSocket, 
+    websocket: WebSocket,
     session_id: Optional[str] = Query(None),
     user_id: Optional[str] = Query(None)
 ):
@@ -758,8 +758,8 @@ async def websocket_repoless_endpoint(
 # Repo-based WebSocket endpoint
 @app.websocket("/chat/{source_id:path}")
 async def websocket_endpoint(
-    websocket: WebSocket, 
-    source_id: str, 
+    websocket: WebSocket,
+    source_id: str,
     session_id: Optional[str] = Query(None),
     auto_mode: bool = Query(False),
     user_id: Optional[str] = Query(None)
@@ -774,19 +774,19 @@ async def websocket_endpoint(
     )
 
 async def _handle_websocket(
-    websocket: WebSocket, 
+    websocket: WebSocket,
     source_id: Optional[str],  # None for repoless
     session_id: Optional[str] = None,
     auto_mode: bool = False,
     user_id: Optional[str] = None
 ):
     await websocket.accept()
-    
+
     # Track which activities we've already sent to the client
     seen_activity_ids = set()
     poller_task = None
     active_session_id = session_id  # Will be set when session is created/reconnected
-    
+
     # Get or create seen files set for this session (persists across reconnections)
     def get_session_seen_files():
         if active_session_id:
@@ -794,7 +794,7 @@ async def _handle_websocket(
                 session_seen_files[active_session_id] = set()
             return session_seen_files[active_session_id]
         return set()
-    
+
     async def poll_jules():
         """Background task to poll for new messages/activities from Jules."""
         cached_session_data = None
@@ -805,60 +805,60 @@ async def _handle_websocket(
                     act_id = activity.get("id") or activity.get("name")
                     if act_id not in seen_activity_ids:
                         seen_activity_ids.add(act_id)
-                        
+
                         # For sessionCompleted, fetch fresh session data for PR info
                         if "sessionCompleted" in activity:
                             try:
                                 cached_session_data = await client.get_session(active_session_id)
                             except Exception as e:
                                 print(f"Error fetching session data: {e}")
-                        
+
                         # Parse activity to structured JSON, passing session data and seen files
                         parsed = parse_activity(activity, session_data=cached_session_data, seen_files=get_session_seen_files())
                         if parsed:
                             await websocket.send_json(parsed)
-                
+
                 await asyncio.sleep(2)  # Poll every 2 seconds
             except Exception as e:
                 print(f"Polling error: {e}")
                 await asyncio.sleep(5)
-    
+
     try:
         if session_id:
             # Reconnecting to existing session
             print(f"DEBUG: Reconnecting to session {session_id}", flush=True)
             session_data = await client.get_session(session_id)
             active_session_id = session_id
-            
+
             # Link session with user for notifications
             if user_id:
                 session_poller.track_session(user_id, session_id)
                 print(f"Tracking reconnecting session {session_id} for user {user_id}")
-            
+
             # Debug: Check what's in session_data
             print(f"DEBUG: session_data keys: {list(session_data.keys()) if session_data else 'None'}", flush=True)
             if session_data and "outputs" in session_data:
                 print(f"DEBUG: session_data.outputs: {session_data['outputs']}", flush=True)
             else:
                 print(f"DEBUG: session_data has NO outputs field", flush=True)
-            
+
             # Send connection confirmation
             await websocket.send_json({
                 "type": "system",
                 "content": "Reconnected to session",
                 "sessionId": session_id
             })
-            
+
             # IMPORTANT: Immediately fetch and send latest activities (history)
             print(f"DEBUG: Loading session history...", flush=True)
             try:
                 # Fetch ALL activities for the session
                 activities = await client.list_activities(session_id, page_size=100, get_all=True)
                 print(f"DEBUG: Found {len(activities)} historical activities", flush=True)
-                
+
                 # Track seen files to avoid duplicate "Updated" messages
                 history_seen_files = set()
-                
+
                 # Send activities in order (already chronological - oldest first for display)
                 for activity in activities:
                     act_id = activity.get("id") or activity.get("name")
@@ -867,7 +867,7 @@ async def _handle_websocket(
                         parsed = parse_activity(activity, session_data=session_data, seen_files=history_seen_files)
                         if parsed:
                             await websocket.send_json(parsed)
-                
+
                 await websocket.send_json({
                     "type": "system",
                     "content": f"Loaded {len(activities)} recent activities"
@@ -875,10 +875,10 @@ async def _handle_websocket(
             except Exception as e:
                 print(f"Error loading history: {e}")
                 await websocket.send_json({
-                    "type": "system", 
+                    "type": "system",
                     "content": f"Warning: Could not load full history"
                 })
-            
+
             # Now start polling for NEW activities
             poller_task = asyncio.create_task(poll_jules())
         else:
@@ -890,7 +890,7 @@ async def _handle_websocket(
                 "status": "waiting_for_task"
             })
             print(f"DEBUG: Waiting for user's first message to create session for source {source_id}")
-        
+
     except Exception as e:
         print(f"Error handling websocket: {e}", flush=True)
         await websocket.send_json({"type": "error", "content": "An internal server error occurred."})
@@ -901,7 +901,7 @@ async def _handle_websocket(
         while True:
             # Wait for user message from phone
             data = await websocket.receive_text()
-            
+
             # If no session yet, create one with this message as the task
             if not active_session_id:
                 try:
@@ -909,44 +909,44 @@ async def _handle_websocket(
                         "type": "status",
                         "content": "Creating session and sending task to Jules..."
                     })
-                    
+
                     # Create session with user's message as the actual task
                     session_data = await client.create_session(
-                        source_id=source_id, 
+                        source_id=source_id,
                         prompt=data,  # User's first message becomes the task
                         auto_mode=auto_mode
                     )
                     print(f"DEBUG: Created session with task: {data[:50]}...")
-                    
+
                     # Extract session_id from response
                     active_session_id = session_data.get("name")
                     if not active_session_id:
                         raw_id = session_data.get("id", "")
                         active_session_id = f"sessions/{raw_id}" if raw_id else None
-                    
+
                     if not active_session_id:
                         await websocket.send_json({"type": "error", "content": "Could not create session"})
                         continue
-                    
+
                     # Track new session for notifications
                     if user_id:
                         session_poller.track_session(user_id, active_session_id)
                         print(f"Tracking new session {active_session_id} for user {user_id}")
-                    
+
                     # Send confirmation
                     await websocket.send_json({
                         "type": "system",
                         "content": "Session created! Jules is working on your task.",
                         "sessionId": active_session_id
                     })
-                    
+
                     # Start polling for this session
                     poller_task = asyncio.create_task(poll_jules())
-                    
+
                 except Exception as e:
                     print(f"Failed to create session: {e}", flush=True)
                     await websocket.send_json({"type": "error", "content": "Failed to create session due to an internal error."})
-                    
+
             else:
                 # Session already exists, handle commands or send messages
                 if data.startswith("/approve"):
@@ -966,29 +966,29 @@ import re
 
 def extract_files_from_text(text: str, diff_files: List[str] = None) -> List[str]:
     """Extract file paths mentioned in message text.
-    
+
     Matches patterns like:
     - `path/to/file.ext` or `file.ext`
     - 'path/to/file.ext' or 'file.ext'
     - path/to/file.ext (common file extensions)
-    
+
     If diff_files is provided, simple filenames will be matched against
     the full paths to resolve them.
     """
     if not text:
         return []
-    
+
     files = []
-    
+
     # Match backtick-quoted file paths: `path/to/file.ext`
     files.extend(BACKTICK_PATTERN.findall(text))
-    
+
     # Match single-quoted file paths: 'path/to/file.ext'
     files.extend(QUOTE_PATTERN.findall(text))
-    
+
     # Match common file extensions without quotes: path/to/file.ext
     files.extend(COMMON_EXTENSIONS_PATTERN.findall(text))
-    
+
     # Deduplicate while preserving order
     seen = set()
     unique_files = []
@@ -996,7 +996,7 @@ def extract_files_from_text(text: str, diff_files: List[str] = None) -> List[str
         if f not in seen:
             seen.add(f)
             unique_files.append(f)
-    
+
     # If we have diff_files, resolve simple filenames to full paths
     if diff_files:
         resolved = []
@@ -1011,12 +1011,12 @@ def extract_files_from_text(text: str, diff_files: List[str] = None) -> List[str
                         resolved.append(diff_path)
                         break
         return resolved
-    
+
     return unique_files
 
 def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = None) -> Dict:
     """Converts a Jules Activity JSON into a structured dict for the Flutter app.
-    
+
     Args:
         activity: The activity dict from Jules API
         session_data: Optional session dict containing outputs[] with PR info
@@ -1026,18 +1026,18 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
     act_keys = [k for k in activity.keys() if k not in {"name", "id", "createTime", "originator"}]
     if act_keys:
         print(f"DEBUG parse_activity: keys={act_keys}, has_artifacts={'artifacts' in activity}", flush=True)
-    
+
     result = {
         "id": activity.get("id") or activity.get("name"),
         "type": "message",
         "originator": activity.get("originator", "agent"),
         "timestamp": activity.get("createTime"),
     }
-    
+
     # Skip user activities UNLESS it's a userMessaged activity (we want to show those)
     if result["originator"] == "user" and "userMessaged" not in activity:
         return None
-    
+
     # Plan Generated - show expandable steps
     if "planGenerated" in activity:
         plan_data = activity["planGenerated"].get("plan", {})
@@ -1049,20 +1049,20 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         ]
         result["content"] = f"Plan with {len(result['steps'])} steps"
         return result
-    
+
     # Plan Approved
     if "planApproved" in activity:
         result["type"] = "plan_approved"
         result["content"] = "Plan approved"
         return result
-    
+
     # Agent Message
     if "agentMessaged" in activity:
         msg = activity["agentMessaged"]
         result["type"] = "message"
         result["content"] = msg.get("agentMessage") or msg.get("text") or msg.get("message", "")
         return result
-    
+
     # User Message (user's chat messages)
     if "userMessaged" in activity:
         # Log the full activity to find the correct field
@@ -1078,32 +1078,32 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             return result
         else:
             print(f"DEBUG userMessaged: message_content was empty, msg={msg}", flush=True)
-    
+
     # Text output / thought / summary from agent
     if "textGenerated" in activity:
         tg = activity["textGenerated"]
         result["type"] = "message"
         result["content"] = tg.get("text") or tg.get("content", "")
         return result
-    
+
     # Generic text field (some activities have this)
     if "text" in activity and isinstance(activity["text"], str):
         result["type"] = "message"
         result["content"] = activity["text"]
         return result
-    
+
     # Thought or summary messages
     if "thought" in activity:
         result["type"] = "message"
         result["content"] = activity["thought"].get("text") or activity["thought"].get("content", "")
         return result
-    
+
     # Summary message
     if "summary" in activity and isinstance(activity["summary"], str):
         result["type"] = "message"
         result["content"] = activity["summary"]
         return result
-    
+
     # Progress Update - DON'T return early if artifacts exist
     if "progressUpdated" in activity:
         progress = activity["progressUpdated"]
@@ -1114,7 +1114,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         # Only return early if there are NO artifacts
         if "artifacts" not in activity:
             return result
-    
+
     # Session Completed
     if "sessionCompleted" in activity:
         # Extract Jules session web URL
@@ -1122,19 +1122,19 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         session_id = session_data.get("id") if session_data else activity.get("name", "").split("/activities/")[0]
         if not jules_url and session_id:
             jules_url = f"https://jules.google.com/{session_id}"
-            
+
         # Try to find changeSet in artifacts
         artifacts = activity.get("artifacts", [])
         print(f"DEBUG sessionCompleted: session_id={session_id}, num_artifacts={len(artifacts)}")
         for i, art in enumerate(artifacts):
             print(f"DEBUG sessionCompleted artifact {i}: keys={list(art.keys())}")
-        
+
         change_set = {}
         for artifact in artifacts:
             if "changeSet" in artifact:
                 change_set = artifact["changeSet"]
                 break
-        
+
         # Store changeSet data for GitHub PR creation
         if change_set and session_id:
             git_patch = change_set.get("gitPatch", {})
@@ -1145,10 +1145,10 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                 "base_commit_id": git_patch.get("baseCommitId"),
             }
             print(f"DEBUG Stored changeSet for session {session_id}")
-        
+
         # Extract info from changeSet (available during live sessions)
         commit_message = change_set.get("gitPatch", {}).get("suggestedCommitMessage", "Changes by Jules")
-        
+
         # Try to extract the branch from outputs or changeSet
         outputs = session_data.get("outputs", []) if session_data else []
         pr_url = None
@@ -1156,16 +1156,16 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             if "pullRequest" in output:
                 pr_url = output["pullRequest"].get("url")
                 break
-        
+
         repo_name = ""
         source = ""
         if session_data:
             source = session_data.get("sourceContext", {}).get("source", "")
             repo_name = source.split("/")[-1]
-        
+
         # Check if we have patch data (for the "Create PR" button)
         has_patch = bool(change_set.get("gitPatch", {}).get("unidiffPatch"))
-        
+
         response = {
             "id": result["id"],
             "timestamp": result["timestamp"],
@@ -1182,7 +1182,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         }
         print(f"DEBUG sessionCompleted response: hasPatch={has_patch}, sessionId={session_id}, pr_url={pr_url}")
         return response
-    
+
     # Session Progress (status updates) - may contain Jules' text messages
     if "sessionProgress" in activity:
         progress = activity["sessionProgress"]
@@ -1191,7 +1191,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         result["type"] = "status"
         result["content"] = progress.get("status") or progress.get("message", "Working...")
         return result
-    
+
     # Check for progressUpdated - another format for status/thinking updates
     if "progressUpdated" in activity:
         progress = activity["progressUpdated"]
@@ -1201,12 +1201,12 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         if isinstance(progress, dict):
             title = progress.get("title", "")
             description = progress.get("description", "")
-            
+
             # Determine if this is just a status update or a real message
             # Status updates: short progress titles without artifacts or description
             # Real messages: have description (the explanation text) or will have artifacts
             has_artifacts = "artifacts" in activity and len(activity["artifacts"]) > 0
-            
+
             # If we have a description, it's a real explanatory message (e.g., "I have successfully modified...")
             if description:
                 # This is a real message - combine title and description for full context
@@ -1231,7 +1231,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                 result["content"] = title
                 print(f"DEBUG progressUpdated: status update = '{title[:100]}'", flush=True)
                 # Note: progress type won't create a chat bubble, just updates indicator
-    
+
     # Agent Messaged (Jules' text/chat responses)
     if "agentMessaged" in activity:
         agent_msg = activity["agentMessaged"]
@@ -1246,14 +1246,14 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             return result
         else:
             print(f"DEBUG agentMessaged: message was empty", flush=True)
-    
-    
+
+
     # Tool Called (commands executed)
     if "toolCalled" in activity:
         tool = activity["toolCalled"]
         tool_name = tool.get("name", "")
         tool_input = tool.get("input", {})
-        
+
         # Extract command if it's a bash/shell tool
         command = tool_input.get("command") or tool_input.get("cmd") or ""
         if command:
@@ -1264,7 +1264,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             result["type"] = "artifact"
             result["content"] = f"Tool: {tool_name}"
             return result
-    
+
     # Step Updated (plan step progress)
     if "stepUpdated" in activity:
         step = activity["stepUpdated"]
@@ -1275,14 +1275,14 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             result["title"] = title
             result["content"] = f"{status}: {title}" if status else title
             return result
-    
+
     # Task Started/Completed
     if "taskStarted" in activity:
         task = activity["taskStarted"]
         result["type"] = "status"
         result["content"] = task.get("description") or task.get("title") or "Task started"
         return result
-    
+
     # Command Executed (another potential format)
     if "commandExecuted" in activity:
         cmd = activity["commandExecuted"]
@@ -1291,27 +1291,27 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             result["type"] = "artifact"
             result["content"] = f"Ran: {command}"
             return result
-    
+
     # Handle artifacts (file changes, bash output)
     if "artifacts" in activity:
         result["artifacts"] = []
         content_parts = []
-        
+
         # If we already have a message from progressUpdated, start with it
         if result.get("content") and result.get("type") == "message":
             content_parts.append(result["content"])
-        
+
         # Debug: Log what artifacts we're getting
         for i, art in enumerate(activity["artifacts"]):
             art_keys = list(art.keys())
             print(f"DEBUG: Artifact {i} keys: {art_keys}", flush=True)
-        
+
         for art in activity["artifacts"]:
             if "changeSet" in art:
                 cs = art["changeSet"]
                 git_patch = cs.get("gitPatch", {})
                 unidiff = git_patch.get("unidiffPatch", "")
-                
+
                 # First, parse files from the cumulative diff (for resolving simple filenames)
                 # Using a dict to preserve insertion order while providing O(1) lookups and avoiding O(N^2) behavior
                 diff_files_dict = {}
@@ -1320,22 +1320,22 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                     if path and path != "/dev/null":
                         diff_files_dict[path] = None
                 diff_files = list(diff_files_dict.keys())
-                
+
                 # Get the message text to extract mentioned files
                 message_text = result.get("content", "")
-                
+
                 # Extract files mentioned in the message and resolve to full paths
                 # Jules web shows only files explicitly mentioned in the step description
                 mentioned_files = extract_files_from_text(message_text, diff_files)
                 print(f"DEBUG: Message text: {message_text[:100] if message_text else 'empty'}", flush=True)
                 print(f"DEBUG: Diff files: {diff_files}", flush=True)
                 print(f"DEBUG: Files mentioned in message: {mentioned_files}", flush=True)
-                
+
                 # Show "Updated {filepath}" only for files mentioned in this step
                 if mentioned_files:
                     for fp in mentioned_files:
                         content_parts.append(f"Updated {fp}")
-                
+
                 # Always store the full patch for viewing/PR creation
                 result["artifacts"].append({
                     "type": "file_change",
@@ -1343,7 +1343,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                     "patch": unidiff,
                     "commitMsg": git_patch.get("suggestedCommitMessage", "")
                 })
-            
+
             # Handle fileUpdated artifacts (single file updates)
             elif "fileUpdated" in art:
                 fu = art["fileUpdated"]
@@ -1355,7 +1355,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                         "files": [file_path],
                         "patch": fu.get("content", "")
                     })
-                    
+
             elif "bashOutput" in art:
                 command = art["bashOutput"].get("command", "")
                 output = art["bashOutput"].get("output", "")
@@ -1367,7 +1367,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                 })
                 if command:
                     content_parts.append(f"Ran: {command}")
-                    
+
             elif "media" in art:
                 result["artifacts"].append({
                     "type": "media",
@@ -1377,7 +1377,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
             else:
                 # Unknown artifact type - log it
                 print(f"DEBUG: Unknown artifact type with keys: {list(art.keys())}")
-        
+
         # Set content from artifacts if we found any
         if content_parts:
             result["type"] = "artifact"
@@ -1386,17 +1386,17 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         elif result["artifacts"]:
             # We have artifacts but no content - something went wrong
             print(f"DEBUG: Artifacts parsed but no content generated. Count: {len(result['artifacts'])}")
-    
+
     # Default fallback
     if "content" not in result:
         # Try to extract any text from the activity
         result["content"] = (
-            activity.get("description") or 
-            activity.get("text") or 
+            activity.get("description") or
+            activity.get("text") or
             activity.get("message") or
             ""
         )
-    
+
     # Skip completely empty activities
     if not result.get("content") and not result.get("artifacts"):
         # Log unhandled activity types for debugging
@@ -1405,7 +1405,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
         if unknown_keys:
             print(f"DEBUG: Unhandled activity keys: {unknown_keys}")
         return None
-    
+
 
     return result
 
@@ -1436,13 +1436,13 @@ def is_mcp_port_in_use(port: int = MCP_PORT) -> bool:
 def start_mcp_server(port: int = MCP_PORT):
     """Start the ExecuteAutomation Playwright MCP server."""
     global mcp_process
-    
+
     if is_mcp_port_in_use(port):
         print(f"✅ MCP server already running on port {port}")
         return True
-    
+
     print(f"🚀 Starting MCP server on port {port}...")
-    
+
     try:
         if os.name == 'nt':
             mcp_process = subprocess.Popen(
@@ -1460,7 +1460,7 @@ def start_mcp_server(port: int = MCP_PORT):
                 stderr=subprocess.STDOUT,
                 text=True
             )
-        
+
         # Wait for server to be ready (max 30 seconds)
         import time
         for i in range(60):
@@ -1468,10 +1468,10 @@ def start_mcp_server(port: int = MCP_PORT):
                 print(f"✅ MCP server ready on port {port}")
                 return True
             time.sleep(0.5)
-        
+
         print("⚠️ MCP server may not be fully ready")
         return True
-        
+
     except Exception as e:
         print(f"❌ Failed to start MCP server: {e}")
         return False
@@ -1521,7 +1521,7 @@ def _write_urls(urls):
 async def save_url_to_history(url: str):
     """Save unique URL to history file asynchronously."""
     urls = await asyncio.to_thread(_read_urls)
-            
+
     if url not in urls:
         urls.append(url)
         await asyncio.to_thread(_write_urls, urls)
@@ -1537,10 +1537,10 @@ async def start_test(request: TestRequest):
 
     # Start MCP server if not running
     start_mcp_server()
-    
+
     test_id = str(uuid.uuid4())[:8]
     await save_url_to_history(request.url)
-    
+
     # Resolve credentials if ID is provided
     username = request.username
     password = request.password
@@ -1563,8 +1563,8 @@ async def start_test(request: TestRequest):
     # Start the test as a background async task in the current event loop
     task = asyncio.create_task(
         tester_agent.run_test(
-            test_id, 
-            request.url, 
+            test_id,
+            request.url,
             request.objective,
             username=username,
             password=password,
@@ -1573,10 +1573,10 @@ async def start_test(request: TestRequest):
     )
     # Register the task so it can be canceled
     tester_agent.active_tasks[test_id] = task
-    
+
     # Small delay to ensure test is registered
     await asyncio.sleep(0.1)
-    
+
     return {
         "test_id": test_id,
         "status": "started",
@@ -1607,23 +1607,23 @@ async def retry_test(test_id: str):
     result = tester_agent.get_test(test_id)
     if not result:
         raise HTTPException(status_code=404, detail="Test not found")
-    
+
     # Start MCP server if not running
     start_mcp_server()
-    
+
     new_test_id = str(uuid.uuid4())[:8]
-    
+
     # Start the test as a background async task
     task = asyncio.create_task(
         tester_agent.run_test(
-            new_test_id, 
-            result.url, 
+            new_test_id,
+            result.url,
             result.objective,
             deeper_analysis=False
         )
     )
     tester_agent.active_tasks[new_test_id] = task
-    
+
     return {
         "test_id": new_test_id,
         "status": "started",
@@ -1640,20 +1640,20 @@ async def retry_test_deeper(test_id: str):
     result = tester_agent.get_test(test_id)
     if not result:
         raise HTTPException(status_code=404, detail="Test not found")
-    
+
     start_mcp_server()
     new_test_id = str(uuid.uuid4())[:8]
-    
+
     task = asyncio.create_task(
         tester_agent.run_test(
-            new_test_id, 
-            result.url, 
+            new_test_id,
+            result.url,
             result.objective,
             deeper_analysis=True
         )
     )
     tester_agent.active_tasks[new_test_id] = task
-    
+
     return {
         "test_id": new_test_id,
         "status": "started",
@@ -1724,7 +1724,7 @@ async def create_preset(owner: str, repo: str, preset: TestPreset):
     """Create a new test preset for a repository."""
     full_name = f"{owner}/{repo}"
     data = _load_presets()
-    
+
     new_preset = {
         "id": str(uuid.uuid4())[:8],
         "title": preset.title,
@@ -1734,10 +1734,10 @@ async def create_preset(owner: str, repo: str, preset: TestPreset):
         "password": encrypt_password(preset.password) if preset.password else None,
         "repository_full_name": full_name
     }
-    
+
     data["presets"].append(new_preset)
     _save_presets(data)
-    
+
     safe_preset = new_preset.copy()
     safe_preset.pop("password", None)
 
@@ -1749,10 +1749,10 @@ async def delete_preset(preset_id: str):
     data = _load_presets()
     original_count = len(data.get("presets", []))
     data["presets"] = [p for p in data.get("presets", []) if p.get("id") != preset_id]
-    
+
     if len(data["presets"]) == original_count:
         raise HTTPException(status_code=404, detail="Preset not found")
-    
+
     _save_presets(data)
     return {"status": "deleted", "preset_id": preset_id}
 
@@ -1778,7 +1778,7 @@ async def save_test_as_preset(test_id: str, title: str = Query(...), repo_full_n
     result = tester_agent.get_test(test_id)
     if not result:
         raise HTTPException(status_code=404, detail="Test not found")
-    
+
     data = _load_presets()
     new_preset = {
         "id": str(uuid.uuid4())[:8],
@@ -1789,10 +1789,10 @@ async def save_test_as_preset(test_id: str, title: str = Query(...), repo_full_n
         "password": None,
         "repository_full_name": repo_full_name
     }
-    
+
     data["presets"].append(new_preset)
     _save_presets(data)
-    
+
     return {"status": "created", "preset": new_preset}
 
 # ===== Speech to Text Endpoints =====
@@ -1802,7 +1802,7 @@ async def speech_to_text(file: UploadFile = File(...)):
     """Transcribe an audio file using Gemini 3 Flash with thinking."""
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server")
-    
+
     try:
         # Save temporary file safely
         ext = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'raw'
@@ -1825,17 +1825,17 @@ async def speech_to_text(file: UploadFile = File(...)):
         except HTTPException:
             os.remove(temp_filename)
             raise
-        
+
         # Using Gemini 3 Flash with thinking_level="medium"
         # Requires google-genai >= 1.51.0
         from google import genai
         from google.genai import types
-        
+
         client = genai.Client(api_key=GEMINI_API_KEY)
-        
+
         # Upload file to Gemini
         myfile = client.files.upload(file=temp_filename)
-        
+
         # Generate transcription with medium thinking level
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
@@ -1847,12 +1847,12 @@ async def speech_to_text(file: UploadFile = File(...)):
                 thinking_config=types.ThinkingConfig(thinking_level="medium")
             )
         )
-        
+
         # Cleanup
         os.remove(temp_filename)
-        
+
         return {"text": response.text.strip()}
-    
+
     except HTTPException as he:
         if 'temp_filename' in locals() and os.path.exists(temp_filename):
             os.remove(temp_filename)
