@@ -6,6 +6,7 @@ import json
 import asyncio
 import uuid
 import re
+import aiofiles
 from typing import List, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 import google.generativeai as genai
@@ -1816,12 +1817,14 @@ async def speech_to_text(file: UploadFile = File(...)):
         file_size = 0
 
         try:
-            with open(temp_filename, "wb") as buffer:
+            # ⚡ Bolt: Replaced synchronous file I/O with `aiofiles` to prevent blocking the event loop
+            # during large audio file uploads (up to 25MB).
+            async with aiofiles.open(temp_filename, "wb") as buffer:
                 while chunk := await file.read(8192):
                     file_size += len(chunk)
                     if file_size > MAX_FILE_SIZE:
                         raise HTTPException(status_code=413, detail="File too large. Maximum size is 25MB.")
-                    buffer.write(chunk)
+                    await buffer.write(chunk)
         except HTTPException:
             os.remove(temp_filename)
             raise

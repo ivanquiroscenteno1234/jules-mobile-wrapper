@@ -16,3 +16,7 @@
 ## 2025-05-18 - [Python Regex Performance]
 **Learning:** In Python, calling `re.findall(pattern, text)` repeatedly inside a frequently called function (like one parsing diffs or logs) forces Python to parse and evaluate the string regex pattern on every invocation, causing unnecessary overhead.
 **Action:** Always extract static regular expressions into module-level variables and pre-compile them using `re.compile(pattern)`. Then, use `.findall(text)` directly on the compiled object to prevent redundant memory allocations and parsing.
+## 2024-05-18 - Async I/O for Screen Shots
+**Bottleneck:** Synchronous I/O in async context blocks event loops.
+**Learning:** For async context, using `aiofiles` is optimal for I/O bound operations. However, CPU bound operations like base64 encoding should still be executed in a thread pool via `asyncio.to_thread` to ensure the event loop isn't blocked.
+**Prevention:** Profile performance-critical code carefully.
