@@ -1403,8 +1403,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildDiffPreview(String patch) {
     if (patch.isEmpty) return const SizedBox.shrink();
 
-    // Parse diff and show first few lines
-    final lines = patch.split('\n').take(10).toList();
+    // ⚡ Bolt: Cache split list to avoid redundant allocations on large diff patches
+    final allLines = patch.split('\n');
+    final lines = allLines.take(10).toList();
 
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -1436,7 +1437,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 4),
           ...lines.map((line) => _buildDiffLine(line)).toList(),
-          if (patch.split('\n').length > 10)
+          if (allLines.length > 10)
             const Text('...', style: TextStyle(color: Colors.white54)),
         ],
       ),
