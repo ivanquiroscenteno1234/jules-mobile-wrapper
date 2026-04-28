@@ -5,9 +5,20 @@ import os
 import json
 import asyncio
 import uuid
+import re
 from typing import List, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks
 import google.generativeai as genai
+
+# Compile regular expression to efficiently parse updated files from git diffs
+DIFF_FILE_PATTERN = re.compile(r"^\+\+\+ (?:b/)?([^\t\n].*)", re.MULTILINE)
+
+# Pre-compile regexes for file path extraction to prevent redundant allocations
+BACKTICK_PATTERN = re.compile(r'`([^`]+\.[a-zA-Z]{1,5})`')
+QUOTE_PATTERN = re.compile(r"'([^']+\.[a-zA-Z]{1,5})'")
+COMMON_EXTENSIONS_PATTERN = re.compile(r'\b(\S+\.(?:py|dart|yaml|yml|json|ts|tsx|js|jsx|md|txt|html|css|scss|java|kt|swift|go|rs|rb|php|c|cpp|h|hpp))\b', re.IGNORECASE)
+GITHUB_PR_URL_PATTERN = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -50,14 +61,44 @@ async def lifespan(app: FastAPI):
     print("Session Poller started.")
     yield
 
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS")
+safe_defaults = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
+if allowed_origins_env:
+    # Parse origins and explicitly filter out the dangerous "*" wildcard
+    allowed_origins = [
+        origin.strip()
+        for origin in allowed_origins_env.split(",")
+        if origin.strip() and origin.strip() != "*"
+    ]
+    # Fallback to safe defaults if the environment variable was just "*" or empty
+    if not allowed_origins:
+        print("WARNING: ALLOWED_ORIGINS only contained wildcards or was empty. Falling back to safe defaults.")
+        allowed_origins = safe_defaults
+else:
+    allowed_origins = safe_defaults
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # In-memory storage for completed session changeSet data
 # Key: session_id, Value: {source, patch, commit_message, base_commit_id}
@@ -82,19 +123,15 @@ def get_encryption_key():
             f.write(key)
         return key
 
-try:
-    from cryptography.fernet import Fernet
-    cipher_suite = Fernet(get_encryption_key())
-except ImportError:
-    print("Warning: 'cryptography' not installed. Password encryption disabled.")
-    cipher_suite = None
+from cryptography.fernet import Fernet
+cipher_suite = Fernet(get_encryption_key())
 
 def encrypt_password(password: str) -> str:
-    if not password or not cipher_suite: return password
+    if not password: return password
     return cipher_suite.encrypt(password.encode()).decode()
 
 def decrypt_password(token: str) -> str:
-    if not token or not cipher_suite: return token
+    if not token: return token
     try:
         return cipher_suite.decrypt(token.encode()).decode()
     except:
@@ -160,8 +197,11 @@ async def list_repos():
                 id=s["name"] # Use the full resource name as ID
             ))
         return repos
+    except HTTPException:
+        raise
     except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/sessions")
 async def list_sessions():
@@ -169,8 +209,11 @@ async def list_sessions():
     try:
         sessions = await client.list_sessions()
         return {"sessions": sessions}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/sessions/{session_id:path}")
 async def get_session(session_id: str):
@@ -192,8 +235,11 @@ async def get_session(session_id: str):
         
         session["pullRequests"] = prs
         return session
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.post("/sessions/{session_id:path}/approve")
 async def approve_plan(session_id: str):
@@ -201,8 +247,11 @@ async def approve_plan(session_id: str):
     try:
         result = await client.approve_plan(session_id)
         return {"success": True, "result": result}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.delete("/sessions/{session_id:path}")
 async def delete_session(session_id: str):
@@ -214,9 +263,11 @@ async def delete_session(session_id: str):
         if full_session_id in completed_session_data:
             del completed_session_data[full_session_id]
         return {"success": True, "message": "Session deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"DEBUG delete_session exception: {e}", flush=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.post("/sessions/{session_id:path}/publish")
 async def publish_branch(session_id: str, create_pr: bool = Query(False)):
@@ -229,8 +280,11 @@ async def publish_branch(session_id: str, create_pr: bool = Query(False)):
     try:
         result = await client.submit_branch(session_id, create_pr=create_pr)
         return {"success": True, "result": result}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/sessions/{session_id}/patch")
 async def get_session_patch(session_id: str):
@@ -325,8 +379,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
         if pr_url:
             print(f"🔍 Using provided PR URL: {pr_url}", flush=True)
             try:
-                import re
-                match = re.match(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
+                match = GITHUB_PR_URL_PATTERN.match(pr_url)
                 if match:
                     pr_owner, pr_repo, pr_number = match.groups()
                     github_client = get_github_client()
@@ -382,8 +435,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
                 print(f"🔍 Trying to fetch diff from PR: {pr_url}", flush=True)
                 try:
                     # Parse PR URL: https://github.com/{owner}/{repo}/pull/{number}
-                    import re
-                    match = re.match(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
+                    match = GITHUB_PR_URL_PATTERN.match(pr_url)
                     if match:
                         pr_owner, pr_repo, pr_number = match.groups()
                         github_client = get_github_client()
@@ -432,7 +484,7 @@ async def generate_test_from_session(session_id: str, pr_url: Optional[str] = Qu
         raise
     except Exception as e:
         print(f"Test generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Test generation failed due to an internal error.")
 
 # ===== Credentials Management Endpoints =====
 
@@ -498,21 +550,6 @@ async def delete_credential(credential_id: str):
     
     raise HTTPException(status_code=404, detail="Credential not found")
 
-@app.get("/credentials/{credential_id}")
-async def get_credential(credential_id: str):
-    """Get a credential by ID (returns username and password for test execution)."""
-    for repo_key, creds in credentials_data.items():
-        for cred in creds:
-            if cred["id"] == credential_id:
-                return {
-                    "id": cred["id"],
-                    "name": cred["name"],
-                    "username": cred["username"],
-                    "password": decrypt_password(cred["password"])
-                }
-    
-    raise HTTPException(status_code=404, detail="Credential not found")
-
 @app.get("/repos/{owner}/{repo}/branches")
 async def list_repo_branches(owner: str, repo: str):
     """List all branches in a GitHub repository."""
@@ -526,8 +563,11 @@ async def list_repo_branches(owner: str, repo: str):
     try:
         branches = await github_client.list_branches(owner, repo)
         return {"branches": branches}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 # ===== GitHub Repo Management Endpoints =====
@@ -566,8 +606,11 @@ async def create_github_repo(request: CreateRepoRequest):
         if e.response.status_code == 422:
             raise HTTPException(status_code=422, detail="Repository name already exists or is invalid")
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.get("/github/repos")
 async def list_github_repos():
@@ -582,8 +625,11 @@ async def list_github_repos():
     try:
         repos = await github_client.list_user_repos(per_page=50)
         return {"repos": repos}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 @app.delete("/github/repos/{owner}/{repo}")
 async def delete_github_repo(owner: str, repo: str):
@@ -601,8 +647,11 @@ async def delete_github_repo(owner: str, repo: str):
             return {"success": True, "message": f"Repository {owner}/{repo} deleted"}
         else:
             raise HTTPException(status_code=404, detail="Repository not found or permission denied")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 @app.post("/sessions/{session_id:path}/github-pr")
@@ -683,8 +732,11 @@ async def create_github_pr(
             branch_only=branch_only,
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 # Repoless WebSocket endpoint - no source_id required
@@ -840,7 +892,8 @@ async def _handle_websocket(
             print(f"DEBUG: Waiting for user's first message to create session for source {source_id}")
         
     except Exception as e:
-        await websocket.send_json({"type": "error", "content": str(e)})
+        print(f"Error handling websocket: {e}", flush=True)
+        await websocket.send_json({"type": "error", "content": "An internal server error occurred."})
         await websocket.close()
         return
 
@@ -891,7 +944,8 @@ async def _handle_websocket(
                     poller_task = asyncio.create_task(poll_jules())
                     
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "content": f"Failed to create session: {e}"})
+                    print(f"Failed to create session: {e}", flush=True)
+                    await websocket.send_json({"type": "error", "content": "Failed to create session due to an internal error."})
                     
             else:
                 # Session already exists, handle commands or send messages
@@ -927,16 +981,13 @@ def extract_files_from_text(text: str, diff_files: List[str] = None) -> List[str
     files = []
     
     # Match backtick-quoted file paths: `path/to/file.ext`
-    backtick_pattern = r'`([^`]+\.[a-zA-Z]{1,5})`'
-    files.extend(re.findall(backtick_pattern, text))
+    files.extend(BACKTICK_PATTERN.findall(text))
     
     # Match single-quoted file paths: 'path/to/file.ext'
-    quote_pattern = r"'([^']+\.[a-zA-Z]{1,5})'"
-    files.extend(re.findall(quote_pattern, text))
+    files.extend(QUOTE_PATTERN.findall(text))
     
     # Match common file extensions without quotes: path/to/file.ext
-    common_extensions = r'\b(\S+\.(?:py|dart|yaml|yml|json|ts|tsx|js|jsx|md|txt|html|css|scss|java|kt|swift|go|rs|rb|php|c|cpp|h|hpp))\b'
-    files.extend(re.findall(common_extensions, text, re.IGNORECASE))
+    files.extend(COMMON_EXTENSIONS_PATTERN.findall(text))
     
     # Deduplicate while preserving order
     seen = set()
@@ -1262,16 +1313,13 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
                 unidiff = git_patch.get("unidiffPatch", "")
                 
                 # First, parse files from the cumulative diff (for resolving simple filenames)
-                diff_files = []
-                for line in unidiff.split("\n"):
-                    if line.startswith("+++ b/"):
-                        path = line[6:].strip()
-                        if path and path != "/dev/null" and path not in diff_files:
-                            diff_files.append(path)
-                    elif line.startswith("+++ ") and not line.startswith("+++\t"):
-                        path = line[4:].strip()
-                        if path and path != "/dev/null" and path not in diff_files:
-                            diff_files.append(path)
+                # Using a dict to preserve insertion order while providing O(1) lookups and avoiding O(N^2) behavior
+                diff_files_dict = {}
+                for match in DIFF_FILE_PATTERN.finditer(unidiff):
+                    path = match.group(1).strip()
+                    if path and path != "/dev/null":
+                        diff_files_dict[path] = None
+                diff_files = list(diff_files_dict.keys())
                 
                 # Get the message text to extract mentioned files
                 message_text = result.get("content", "")
@@ -1452,42 +1500,74 @@ class TestRequest(BaseModel):
     objective: str
     username: Optional[str] = None
     password: Optional[str] = None
+    credential_id: Optional[str] = None
     deeper_analysis: bool = False
 
 URL_HISTORY_FILE = "test_urls.json"
 
-def save_url_to_history(url: str):
-    """Save unique URL to history file."""
-    urls = []
+def _read_urls():
     if os.path.exists(URL_HISTORY_FILE):
         try:
             with open(URL_HISTORY_FILE, "r") as f:
-                urls = json.load(f)
+                return json.load(f)
         except:
-            urls = []
+            return []
+    return []
+
+def _write_urls(urls):
+    with open(URL_HISTORY_FILE, "w") as f:
+        json.dump(urls, f)
+
+async def save_url_to_history(url: str):
+    """Save unique URL to history file asynchronously."""
+    urls = await asyncio.to_thread(_read_urls)
             
     if url not in urls:
         urls.append(url)
-        with open(URL_HISTORY_FILE, "w") as f:
-            json.dump(urls, f)
+        await asyncio.to_thread(_write_urls, urls)
 
 @app.post("/test/start")
 async def start_test(request: TestRequest):
     """Start a new test with the Tester Agent."""
+    # Prevent SSRF/local file access
+    import urllib.parse
+    parsed_url = urllib.parse.urlparse(request.url)
+    if parsed_url.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme. Only http and https are allowed.")
+
     # Start MCP server if not running
     start_mcp_server()
     
     test_id = str(uuid.uuid4())[:8]
-    save_url_to_history(request.url)
+    await save_url_to_history(request.url)
     
+    # Resolve credentials if ID is provided
+    username = request.username
+    password = request.password
+
+    if request.credential_id:
+        cred_found = False
+        for repo_key, creds in credentials_data.items():
+            for cred in creds:
+                if cred["id"] == request.credential_id:
+                    username = cred["username"]
+                    password = decrypt_password(cred["password"])
+                    cred_found = True
+                    break
+            if cred_found:
+                break
+
+        if not cred_found:
+            raise HTTPException(status_code=404, detail="Credential not found")
+
     # Start the test as a background async task in the current event loop
     task = asyncio.create_task(
         tester_agent.run_test(
             test_id, 
             request.url, 
             request.objective,
-            username=request.username,
-            password=request.password,
+            username=username,
+            password=password,
             deeper_analysis=request.deeper_analysis
         )
     )
@@ -1588,13 +1668,7 @@ async def retry_test_deeper(test_id: str):
 @app.get("/test/urls")
 async def get_test_urls():
     """Get list of previously used test URLs."""
-    if os.path.exists(URL_HISTORY_FILE):
-        try:
-            with open(URL_HISTORY_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
+    return await asyncio.to_thread(_read_urls)
 
 @app.get("/tests")
 async def list_tests():
@@ -1635,7 +1709,15 @@ async def get_repo_presets(owner: str, repo: str):
     full_name = f"{owner}/{repo}"
     data = _load_presets()
     repo_presets = [p for p in data.get("presets", []) if p.get("repository_full_name") == full_name]
-    return {"presets": repo_presets}
+
+    # Strip passwords before returning to client
+    safe_presets = []
+    for p in repo_presets:
+        safe_p = p.copy()
+        safe_p.pop("password", None)
+        safe_presets.append(safe_p)
+
+    return {"presets": safe_presets}
 
 @app.post("/repos/{owner}/{repo}/presets")
 async def create_preset(owner: str, repo: str, preset: TestPreset):
@@ -1649,14 +1731,17 @@ async def create_preset(owner: str, repo: str, preset: TestPreset):
         "url": preset.url,
         "objective": preset.objective,
         "username": preset.username,
-        "password": preset.password,
+        "password": encrypt_password(preset.password) if preset.password else None,
         "repository_full_name": full_name
     }
     
     data["presets"].append(new_preset)
     _save_presets(data)
     
-    return {"status": "created", "preset": new_preset}
+    safe_preset = new_preset.copy()
+    safe_preset.pop("password", None)
+
+    return {"status": "created", "preset": safe_preset}
 
 @app.delete("/presets/{preset_id}")
 async def delete_preset(preset_id: str):
@@ -1675,6 +1760,16 @@ async def delete_preset(preset_id: str):
 async def list_all_presets():
     """List all test presets."""
     data = _load_presets()
+
+    # Strip passwords before returning to client
+    if "presets" in data:
+        safe_presets = []
+        for p in data["presets"]:
+            safe_p = p.copy()
+            safe_p.pop("password", None)
+            safe_presets.append(safe_p)
+        data["presets"] = safe_presets
+
     return data
 
 @app.post("/test/{test_id}/save-as-preset")
@@ -1709,10 +1804,27 @@ async def speech_to_text(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server")
     
     try:
-        # Save temporary file
-        temp_filename = f"temp_{uuid.uuid4()}.{file.filename.split('.')[-1]}"
-        with open(temp_filename, "wb") as buffer:
-            buffer.write(await file.read())
+        # Save temporary file safely
+        ext = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'raw'
+        safe_ext = ''.join(c for c in ext if c.isalnum())
+        if not safe_ext:
+            safe_ext = "audio"
+        temp_filename = f"temp_{uuid.uuid4()}.{safe_ext}"
+
+        # 25MB size limit
+        MAX_FILE_SIZE = 25 * 1024 * 1024
+        file_size = 0
+
+        try:
+            with open(temp_filename, "wb") as buffer:
+                while chunk := await file.read(8192):
+                    file_size += len(chunk)
+                    if file_size > MAX_FILE_SIZE:
+                        raise HTTPException(status_code=413, detail="File too large. Maximum size is 25MB.")
+                    buffer.write(chunk)
+        except HTTPException:
+            os.remove(temp_filename)
+            raise
         
         # Using Gemini 3 Flash with thinking_level="medium"
         # Requires google-genai >= 1.51.0
@@ -1741,11 +1853,15 @@ async def speech_to_text(file: UploadFile = File(...)):
         
         return {"text": response.text.strip()}
     
+    except HTTPException as he:
+        if 'temp_filename' in locals() and os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        raise he
     except Exception as e:
         print(f"STT Error: {e}")
         if 'temp_filename' in locals() and os.path.exists(temp_filename):
             os.remove(temp_filename)
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Transcription failed due to an internal error.")
 
 if __name__ == "__main__":
     # Attempt to start ngrok for easier mobile testing

@@ -220,7 +220,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _startTest() async {
+  Future<void> _startTest({bool deeper = false}) async {
     if (_urlController.text.isEmpty || _objectiveController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter URL and test objective')),
@@ -235,22 +235,6 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     });
 
     try {
-      // If a credential is selected, fetch the full credential data
-      String? username;
-      String? password;
-      
-      if (_selectedCredId != null) {
-        final credResponse = await http.get(
-          Uri.parse('${AppConfig.serverUrl}/credentials/$_selectedCredId'),
-          headers: {'ngrok-skip-browser-warning': 'true'},
-        );
-        if (credResponse.statusCode == 200) {
-          final credData = json.decode(credResponse.body);
-          username = credData['username'];
-          password = credData['password'];
-        }
-      }
-      
       final response = await http.post(
         Uri.parse('${AppConfig.serverUrl}/test/start'),
         headers: {
@@ -260,8 +244,8 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
         body: json.encode({
           'url': _urlController.text,
           'objective': _objectiveController.text,
-          'username': username,
-          'password': password,
+          'credential_id': _selectedCredId,
+          'deeper_analysis': deeper,
         }),
       );
 
@@ -450,8 +434,11 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             if (textEditingValue.text.isEmpty) {
               return _urlHistory;
             }
+            // ⚡ Bolt: Pre-compute lowercase query outside the filter loop to prevent
+            // O(N) redundant string allocations, reducing UI thread blockage during typing.
+            final query = textEditingValue.text.toLowerCase();
             return _urlHistory.where((String option) {
-              return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+              return option.toLowerCase().contains(query);
             });
           },
           onSelected: (String selection) {
@@ -668,6 +655,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
           children: [
             IconButton(
               icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back',
               onPressed: () => setState(() {
                 if (!_isRunning) _testResult = null;
               }),
@@ -802,6 +790,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back',
                 onPressed: () => setState(() => _selectedHistoryTest = null),
               ),
               const Text('Test Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -938,6 +927,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                   labelText: 'Preset Title',
                   hintText: 'e.g., Login Flow',
                 ),
+                onChanged: (_) => setDialogState(() {}),
               ),
               const SizedBox(height: 16),
               const Text('Repository', style: TextStyle(fontSize: 12, color: Colors.grey)),
@@ -971,7 +961,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: (selectedRepo == null || isSaving) 
+              onPressed: (titleController.text.trim().isEmpty || selectedRepo == null || isSaving)
                 ? null 
                 : () async {
                     setDialogState(() => isSaving = true);
@@ -1008,7 +998,13 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
                       valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                     ),
                   )
-                : const Text('Save'),
+                : Text(
+                    titleController.text.trim().isEmpty
+                        ? 'Enter title'
+                        : selectedRepo == null
+                            ? 'Select repo'
+                            : 'Save',
+                  ),
             ),
           ],
         ),
@@ -1036,185 +1032,181 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
         ),
-        // Use Column instead of ListView.builder with shrinkWrap to avoid layout rounding bugs
-        Column(
-          children: [
-            ...steps.asMap().entries.map((entry) {
-              final index = entry.key;
-              final step = entry.value;
-              final isLast = index == steps.length - 1;
-              final pageState = step['page_state'] ?? 'OTHER';
-              final success = step['success'] ?? true;
-              final isRunning = result['status'] == 'running' && isLast;
-              
-              return Stack(
+        // Use spread operator with map instead of ListView.builder with shrinkWrap to avoid layout rounding bugs
+        ...steps.asMap().entries.map((entry) {
+          final index = entry.key;
+          final step = entry.value;
+          final isLast = index == steps.length - 1;
+          final pageState = step['page_state'] ?? 'OTHER';
+          final success = step['success'] ?? true;
+          final isRunning = result['status'] == 'running' && isLast;
+
+          return Stack(
+            children: [
+              // Timeline Line (Positioned behind content)
+              if (!isLast)
+                Positioned(
+                  left: 6, // Half of 14 (dot width) - 1 (line width/2)
+                  top: 14, // Start after the dot
+                  bottom: 0,
+                  child: Container(
+                    width: 2,
+                    color: (success ? Colors.green : Colors.red).withOpacity(0.3),
+                  ),
+                ),
+
+              // Content Row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Timeline Line (Positioned behind content)
-                  if (!isLast)
-                    Positioned(
-                      left: 6, // Half of 14 (dot width) - 1 (line width/2)
-                      top: 14, // Start after the dot
-                      bottom: 0,
-                      child: Container(
-                        width: 2,
-                        color: (success ? Colors.green : Colors.red).withOpacity(0.3),
-                      ),
+                  // Dot
+                  Container(
+                    width: 14,
+                    height: 14,
+                    margin: const EdgeInsets.only(top: 0),
+                    decoration: BoxDecoration(
+                      color: isRunning ? Colors.blue : (success ? Colors.green : Colors.red),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: isRunning
+                        ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8, spreadRadius: 2)]
+                        : null,
                     ),
-                  
-                  // Content Row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Dot
-                      Container(
-                        width: 14,
-                        height: 14,
-                        margin: const EdgeInsets.only(top: 0),
-                        decoration: BoxDecoration(
-                          color: isRunning ? Colors.blue : (success ? Colors.green : Colors.red),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: isRunning 
-                            ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8, spreadRadius: 2)]
-                            : null,
-                        ),
-                        child: isRunning
-                          ? const Center(child: Padding(padding: EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 1, color: Colors.white)))
-                          : (success 
-                              ? const Icon(Icons.check, size: 8, color: Colors.white)
-                              : const Icon(Icons.close, size: 8, color: Colors.white)),
-                      ),
-                      const SizedBox(width: 16),
-                      // Step Content
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 24),
-                          child: _buildGlassCard(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    child: isRunning
+                      ? const Center(child: Padding(padding: EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 1, color: Colors.white)))
+                      : (success
+                          ? const Icon(Icons.check, size: 8, color: Colors.white)
+                          : const Icon(Icons.close, size: 8, color: Colors.white)),
+                  ),
+                  const SizedBox(width: 16),
+                  // Step Content
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: _buildGlassCard(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        step['description'] ?? 'Step ${index + 1}',
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _buildPageStateBadge(pageState),
-                                  ],
+                                Expanded(
+                                  child: Text(
+                                    step['description'] ?? 'Step ${index + 1}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
                                 ),
-                                if (step['action'] != null) ...[
-                                  const SizedBox(height: 8),
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.03),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      '${step['action']}${step['target'] != null ? ' → ${step['target']}' : ''}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        color: Theme.of(context).brightness == Brightness.dark 
-                                          ? Colors.white70 
-                                          : Colors.grey[700],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                if (step['reasoning'] != null) ...[
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    step['reasoning'],
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Theme.of(context).brightness == Brightness.dark 
-                                        ? Colors.white60 
-                                        : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                                if (step['alternative_selectors'] != null && (step['alternative_selectors'] as List).isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  const Text('Alternative Selectors:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 4),
-                                  Wrap(
-                                    spacing: 4,
-                                    children: (step['alternative_selectors'] as List).map((s) => Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.withOpacity(0.05),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(color: Colors.blue.withOpacity(0.1)),
-                                      ),
-                                      child: Text(s.toString(), style: const TextStyle(fontSize: 8, fontFamily: 'monospace')),
-                                    )).toList(),
-                                  ),
-                                ],
-                                if (step['debug_info'] != null && (step['debug_info'] as Map).isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  const Text('Debug Map:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 4),
-                                  ... (step['debug_info'] as Map).entries.map((e) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 2),
-                                    child: Text('• ${e.key}: ${e.value}', style: const TextStyle(fontSize: 8)),
-                                  )).toList(),
-                                ],
-                                if (step['error'] != null) ...[
-                                  const SizedBox(height: 8),
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.error_outline, size: 14, color: Colors.red),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            step['error'],
-                                            style: const TextStyle(color: Colors.red, fontSize: 11),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                                if (step['screenshot'] != null && step['screenshot'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 12),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Image.memory(
-                                      base64Decode(step['screenshot']),
-                                      height: 148, // Reduced from 150 to avoid rounding overflow
-                                      width: double.infinity,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 8), 
+                                const SizedBox(width: 8),
+                                _buildPageStateBadge(pageState),
                               ],
                             ),
-                          ),
+                            if (step['action'] != null) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.03),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '${step['action']}${step['target'] != null ? ' → ${step['target']}' : ''}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    color: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white70
+                                      : Colors.grey[700],
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (step['reasoning'] != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                step['reasoning'],
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                            if (step['alternative_selectors'] != null && (step['alternative_selectors'] as List).isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              const Text('Alternative Selectors:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 4,
+                                children: (step['alternative_selectors'] as List).map((s) => Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withOpacity(0.05),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.blue.withOpacity(0.1)),
+                                  ),
+                                  child: Text(s.toString(), style: const TextStyle(fontSize: 8, fontFamily: 'monospace')),
+                                )).toList(),
+                              ),
+                            ],
+                            if (step['debug_info'] != null && (step['debug_info'] as Map).isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              const Text('Debug Map:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              ... (step['debug_info'] as Map).entries.map((e) => Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: Text('• ${e.key}: ${e.value}', style: const TextStyle(fontSize: 8)),
+                              )).toList(),
+                            ],
+                            if (step['error'] != null) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        step['error'],
+                                        style: const TextStyle(color: Colors.red, fontSize: 11),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (step['screenshot'] != null && step['screenshot'].toString().isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                clipBehavior: Clip.antiAlias,
+                                child: Image.memory(
+                                  base64Decode(step['screenshot']),
+                                  height: 148, // Reduced from 150 to avoid rounding overflow
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ],
-              );
-            }),
-          ],
-        ),
+              ),
+            ],
+          );
+        }),
       ],
     );
   }
@@ -1308,6 +1300,7 @@ class _TestScreenState extends State<TestScreen> with SingleTickerProviderStateM
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ActionChip(
+        tooltip: 'Use $label template',
         label: Text(label, style: const TextStyle(fontSize: 12)),
         onPressed: () {
           setState(() {

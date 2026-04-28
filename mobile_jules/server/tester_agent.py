@@ -195,13 +195,22 @@ class TesterAgent:
                 # Remove any trailing quotes or extra characters
                 path = path.strip('"').strip("'")
                 
-                # Read the file and encode to base64
-                import os
-                if os.path.exists(path):
-                    with open(path, "rb") as f:
-                        return base64.b64encode(f.read()).decode()
+                # Read the file and encode to base64 asynchronously
+                async def _read_file_async():
+                    import os
+                    import aiofiles
+                    if os.path.exists(path):
+                        async with aiofiles.open(path, "rb") as f:
+                            content = await f.read()
+                            # Offload CPU-bound base64 encoding to thread
+                            return await asyncio.to_thread(lambda c: base64.b64encode(c).decode(), content)
+                    return None
+
+                result_b64 = await _read_file_async()
+                if result_b64:
+                    return result_b64
                 else:
-                    print(f"⚠️ Screenshot file not found: {path}")
+                    print(f"⚠️ Screenshot file not found or empty: {path}")
                     return ""
             else:
                 # Maybe it's already base64 or some other format
@@ -265,8 +274,8 @@ IMPORTANT: Respond with ONLY the JSON object, no markdown code blocks."""
             
             # Add image if available
             if screenshot_b64:
-                image_data = base64.b64decode(screenshot_b64)
-                image = Image.open(io.BytesIO(image_data))
+                image_data = await asyncio.to_thread(base64.b64decode, screenshot_b64)
+                image = await asyncio.to_thread(Image.open, io.BytesIO(image_data))
                 contents.append(image)
             
             # Call generate_content with ThinkingConfig
@@ -428,8 +437,8 @@ Respond with ONLY a JSON object:
             # Add screenshot if available
             if screenshot_b64 and self.use_screenshots:
                 try:
-                    img_data = base64.b64decode(screenshot_b64)
-                    img = Image.open(io.BytesIO(img_data))
+                    img_data = await asyncio.to_thread(base64.b64decode, screenshot_b64)
+                    img = await asyncio.to_thread(Image.open, io.BytesIO(img_data))
                     contents.append(img)
                 except:
                     pass
