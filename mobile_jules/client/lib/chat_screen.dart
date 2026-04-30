@@ -364,8 +364,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (chatMsg.type == 'progress') {
                 final content = chatMsg.content?.toLowerCase() ?? '';
                 // Skip past-tense progress messages (completed actions shouldn't be working indicator)
-                final isPastTense =
-                    content.endsWith('ed') ||
+                final isPastTense = content.endsWith('ed') ||
                     content.contains('completed') ||
                     content.contains('reviewed') ||
                     content.contains('finished') ||
@@ -506,9 +505,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final branches = (data['branches'] as List)
-            .map((b) => b['name'] as String)
-            .toList();
+        final branches =
+            (data['branches'] as List).map((b) => b['name'] as String).toList();
 
         setState(() {
           _availableBranches = branches;
@@ -546,15 +544,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     try {
-      final uri =
-          Uri.parse(
-            '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/github-pr',
-          ).replace(
-            queryParameters: {
-              'base_branch': _selectedBranch,
-              'branch_only': branchOnly.toString(),
-            },
-          );
+      final uri = Uri.parse(
+        '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/github-pr',
+      ).replace(
+        queryParameters: {
+          'base_branch': _selectedBranch,
+          'branch_only': branchOnly.toString(),
+        },
+      );
 
       final response = await http.post(
         uri,
@@ -968,8 +965,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           final errorData = jsonDecode(response.body);
                           setDialogState(() {
                             isCreating = false;
-                            errorMessage =
-                                errorData['detail'] ??
+                            errorMessage = errorData['detail'] ??
                                 'Failed to create repository';
                           });
                         }
@@ -1134,12 +1130,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   icon: _isRecording
                       ? const Icon(Icons.stop, color: Colors.red)
                       : _isTranscribing
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.mic, color: Colors.deepPurple),
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.mic, color: Colors.deepPurple),
                   onPressed: _isTranscribing ? null : _toggleRecording,
                   tooltip: _isRecording ? 'Stop recording' : 'Voice input',
                 ),
@@ -1231,8 +1227,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // A plan is considered approved if:
     // 1. It matches the planId of the plan that was just approved (if we tracked it)
     // 2. OR the session has moved past planning/approval stage
-    final isPlanApproved =
-        _pendingPlanId == null &&
+    final isPlanApproved = _pendingPlanId == null &&
         (_sessionState == 'IN_PROGRESS' ||
             _sessionState == 'COMPLETED' ||
             _sessionState == 'FAILED');
@@ -1244,8 +1239,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ExpansionTile(
             leading: const Icon(Icons.list_alt, color: Colors.deepPurple),
             title: Text('Plan (${msg.steps?.length ?? 0} steps)'),
-            children:
-                msg.steps?.asMap().entries.map((entry) {
+            children: msg.steps?.asMap().entries.map((entry) {
                   final idx = entry.key;
                   final step = entry.value as Map<String, dynamic>;
                   return ListTile(
@@ -1404,7 +1398,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (patch.isEmpty) return const SizedBox.shrink();
 
     // Parse diff and show first few lines
-    final lines = patch.split('\n').take(10).toList();
+    // ⚡ Bolt: Cache split lines to avoid duplicate O(N) string allocation
+    final allLines = patch.split('\n');
+    final lines = allLines.take(10).toList();
 
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -1436,7 +1432,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 4),
           ...lines.map((line) => _buildDiffLine(line)).toList(),
-          if (patch.split('\n').length > 10)
+          if (allLines.length > 10)
             const Text('...', style: TextStyle(color: Colors.white54)),
         ],
       ),
@@ -1940,9 +1936,8 @@ class CompletedTaskBadge extends StatelessWidget {
                             message.repoName!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isDark
-                                  ? Colors.grey[500]
-                                  : Colors.grey[600],
+                              color:
+                                  isDark ? Colors.grey[500] : Colors.grey[600],
                             ),
                           ),
                       ],
@@ -2113,8 +2108,8 @@ class CompletedTaskBadge extends StatelessWidget {
                                 child: DropdownButton<String>(
                                   value:
                                       availableBranches.contains(selectedBranch)
-                                      ? selectedBranch
-                                      : null,
+                                          ? selectedBranch
+                                          : null,
                                   hint: Text(selectedBranch),
                                   isExpanded: true,
                                   dropdownColor: isDark
@@ -2179,7 +2174,7 @@ class CompletedTaskBadge extends StatelessWidget {
                         onPressed: isPublishing
                             ? null
                             : () =>
-                                  onCreateGitHubPR(sessionId, branchOnly: true),
+                                onCreateGitHubPR(sessionId, branchOnly: true),
                         icon: isPublishing
                             ? const SizedBox(
                                 width: 16,
@@ -2209,9 +2204,9 @@ class CompletedTaskBadge extends StatelessWidget {
                         onPressed: isPublishing
                             ? null
                             : () => onCreateGitHubPR(
-                                sessionId,
-                                branchOnly: false,
-                              ),
+                                  sessionId,
+                                  branchOnly: false,
+                                ),
                         icon: isPublishing
                             ? const SizedBox(
                                 width: 16,
