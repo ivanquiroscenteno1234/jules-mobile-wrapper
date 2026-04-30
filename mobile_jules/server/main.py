@@ -1413,6 +1413,7 @@ def parse_activity(activity: Dict, session_data: Dict = None, seen_files: set = 
 import socket
 import subprocess
 import signal
+import shutil
 
 MCP_PORT = 8931
 mcp_process = None
@@ -1445,12 +1446,13 @@ def start_mcp_server(port: int = MCP_PORT):
     
     try:
         if os.name == 'nt':
+            npx_path = shutil.which('npx') or 'npx'
             mcp_process = subprocess.Popen(
-                f'npx @executeautomation/playwright-mcp-server --port {port}',
+                [npx_path, "@executeautomation/playwright-mcp-server", "--port", str(port)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                shell=True,
+                shell=False,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
             )
         else:

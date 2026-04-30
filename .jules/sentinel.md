@@ -26,3 +26,8 @@
 **Vulnerability:** If the `cryptography` dependency was missing, the server would catch the `ImportError` and silently fallback to storing user passwords in plaintext without raising any alerts.
 **Learning:** Security controls should never silently fail open. If a dependency required for a critical security function (like password encryption) is missing, the application should fail to start or throw a hard error rather than proceeding insecurely.
 **Prevention:** Remove `try-except ImportError` blocks around critical security dependencies. Ensure security variables (like `cipher_suite`) are always required, and make the application fail closed if initialization is impossible.
+
+## 2024-05-24 - [Fix Command Injection Risk in MCP Server Startup]
+**Vulnerability:** The MCP server was started using `subprocess.Popen` with `shell=True` and string interpolation on Windows. This introduces a risk of Command Injection if any part of the command string is attacker-controlled.
+**Learning:** `shell=True` was likely used because Windows requires it to execute `.cmd` scripts (like `npx`) when they are not explicitly named. Using `shell=True` just to resolve an executable path is a dangerous practice that opens the door to command injection.
+**Prevention:** Never use `shell=True`. Instead, use `shutil.which('npx')` to explicitly resolve the executable path (e.g., `npx.cmd`) and pass the command arguments as a list to `subprocess.Popen` with `shell=False`.
