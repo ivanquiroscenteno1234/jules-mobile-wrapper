@@ -364,8 +364,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (chatMsg.type == 'progress') {
                 final content = chatMsg.content?.toLowerCase() ?? '';
                 // Skip past-tense progress messages (completed actions shouldn't be working indicator)
-                final isPastTense =
-                    content.endsWith('ed') ||
+                final isPastTense = content.endsWith('ed') ||
                     content.contains('completed') ||
                     content.contains('reviewed') ||
                     content.contains('finished') ||
@@ -506,9 +505,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final branches = (data['branches'] as List)
-            .map((b) => b['name'] as String)
-            .toList();
+        final branches =
+            (data['branches'] as List).map((b) => b['name'] as String).toList();
 
         setState(() {
           _availableBranches = branches;
@@ -546,15 +544,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     try {
-      final uri =
-          Uri.parse(
-            '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/github-pr',
-          ).replace(
-            queryParameters: {
-              'base_branch': _selectedBranch,
-              'branch_only': branchOnly.toString(),
-            },
-          );
+      final uri = Uri.parse(
+        '${AppConfig.serverUrl}/sessions/${Uri.encodeComponent(sessionId)}/github-pr',
+      ).replace(
+        queryParameters: {
+          'base_branch': _selectedBranch,
+          'branch_only': branchOnly.toString(),
+        },
+      );
 
       final response = await http.post(
         uri,
@@ -968,8 +965,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           final errorData = jsonDecode(response.body);
                           setDialogState(() {
                             isCreating = false;
-                            errorMessage =
-                                errorData['detail'] ??
+                            errorMessage = errorData['detail'] ??
                                 'Failed to create repository';
                           });
                         }
@@ -993,7 +989,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         color: Colors.white,
                       ),
                     )
-                  : const Text('Create'),
+                  : Text(
+                      nameController.text.trim().isEmpty
+                          ? 'Enter name'
+                          : 'Create',
+                    ),
             ),
           ],
         ),
@@ -1134,12 +1134,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   icon: _isRecording
                       ? const Icon(Icons.stop, color: Colors.red)
                       : _isTranscribing
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.mic, color: Colors.deepPurple),
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.mic, color: Colors.deepPurple),
                   onPressed: _isTranscribing ? null : _toggleRecording,
                   tooltip: _isRecording ? 'Stop recording' : 'Voice input',
                 ),
@@ -1231,8 +1231,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // A plan is considered approved if:
     // 1. It matches the planId of the plan that was just approved (if we tracked it)
     // 2. OR the session has moved past planning/approval stage
-    final isPlanApproved =
-        _pendingPlanId == null &&
+    final isPlanApproved = _pendingPlanId == null &&
         (_sessionState == 'IN_PROGRESS' ||
             _sessionState == 'COMPLETED' ||
             _sessionState == 'FAILED');
@@ -1244,8 +1243,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ExpansionTile(
             leading: const Icon(Icons.list_alt, color: Colors.deepPurple),
             title: Text('Plan (${msg.steps?.length ?? 0} steps)'),
-            children:
-                msg.steps?.asMap().entries.map((entry) {
+            children: msg.steps?.asMap().entries.map((entry) {
                   final idx = entry.key;
                   final step = entry.value as Map<String, dynamic>;
                   return ListTile(
@@ -1940,9 +1938,8 @@ class CompletedTaskBadge extends StatelessWidget {
                             message.repoName!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isDark
-                                  ? Colors.grey[500]
-                                  : Colors.grey[600],
+                              color:
+                                  isDark ? Colors.grey[500] : Colors.grey[600],
                             ),
                           ),
                       ],
@@ -2113,8 +2110,8 @@ class CompletedTaskBadge extends StatelessWidget {
                                 child: DropdownButton<String>(
                                   value:
                                       availableBranches.contains(selectedBranch)
-                                      ? selectedBranch
-                                      : null,
+                                          ? selectedBranch
+                                          : null,
                                   hint: Text(selectedBranch),
                                   isExpanded: true,
                                   dropdownColor: isDark
@@ -2175,28 +2172,35 @@ class CompletedTaskBadge extends StatelessWidget {
                   children: [
                     // Create Branch Only button
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: isPublishing
-                            ? null
-                            : () =>
-                                  onCreateGitHubPR(sessionId, branchOnly: true),
-                        icon: isPublishing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.account_tree, size: 16),
-                        label: Text(isPublishing ? '...' : 'Branch'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[600],
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(0, 45),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                      child: Tooltip(
+                        message: isPublishing
+                            ? 'Publishing in progress'
+                            : 'Create a GitHub branch',
+                        child: ElevatedButton.icon(
+                          onPressed: isPublishing
+                              ? null
+                              : () => onCreateGitHubPR(
+                                    sessionId,
+                                    branchOnly: true,
+                                  ),
+                          icon: isPublishing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.account_tree, size: 16),
+                          label: Text(isPublishing ? '...' : 'Branch'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue[600],
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 45),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
                         ),
                       ),
@@ -2205,30 +2209,37 @@ class CompletedTaskBadge extends StatelessWidget {
                     // Create PR button
                     Expanded(
                       flex: 2,
-                      child: ElevatedButton.icon(
-                        onPressed: isPublishing
-                            ? null
-                            : () => onCreateGitHubPR(
-                                sessionId,
-                                branchOnly: false,
-                              ),
-                        icon: isPublishing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.merge, size: 16),
-                        label: Text(isPublishing ? 'Creating...' : 'Create PR'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.purple[600],
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(0, 45),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                      child: Tooltip(
+                        message: isPublishing
+                            ? 'Publishing in progress'
+                            : 'Create a Pull Request',
+                        child: ElevatedButton.icon(
+                          onPressed: isPublishing
+                              ? null
+                              : () => onCreateGitHubPR(
+                                    sessionId,
+                                    branchOnly: false,
+                                  ),
+                          icon: isPublishing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.merge, size: 16),
+                          label: Text(
+                            isPublishing ? 'Creating...' : 'Create PR',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.purple[600],
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 45),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
                         ),
                       ),

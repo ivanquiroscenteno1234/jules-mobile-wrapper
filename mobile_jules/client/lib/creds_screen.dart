@@ -131,9 +131,8 @@ class _CredsScreenState extends State<CredsScreen> {
                             ? Icons.visibility
                             : Icons.visibility_off,
                       ),
-                      tooltip: obscurePassword
-                          ? 'Show Password'
-                          : 'Hide Password',
+                      tooltip:
+                          obscurePassword ? 'Show Password' : 'Hide Password',
                       onPressed: () => setDialogState(
                         () => obscurePassword = !obscurePassword,
                       ),
@@ -149,20 +148,24 @@ class _CredsScreenState extends State<CredsScreen> {
               child: const Text('Cancel'),
             ),
             Tooltip(
-              message:
-                  (nameController.text.isEmpty ||
+              message: (nameController.text.isEmpty ||
                       usernameController.text.isEmpty ||
                       passwordController.text.isEmpty)
                   ? 'Please fill all fields'
                   : 'Save credential',
               child: ElevatedButton(
-                onPressed:
-                    (nameController.text.isEmpty ||
+                onPressed: (nameController.text.isEmpty ||
                         usernameController.text.isEmpty ||
                         passwordController.text.isEmpty)
                     ? null
                     : () => Navigator.pop(context, true),
-                child: const Text('Save'),
+                child: Text(
+                  (nameController.text.isEmpty ||
+                          usernameController.text.isEmpty ||
+                          passwordController.text.isEmpty)
+                      ? 'Fill required fields'
+                      : 'Save',
+                ),
               ),
             ),
           ],
@@ -341,7 +344,6 @@ class _CredsScreenState extends State<CredsScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
                     if (_selectedRepo == null)
                       const Expanded(
                         child: Center(
