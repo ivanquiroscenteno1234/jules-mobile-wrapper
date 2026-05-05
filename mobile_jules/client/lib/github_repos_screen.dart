@@ -254,7 +254,7 @@ class _GitHubReposScreenState extends State<GitHubReposScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.folder_off, size: 64, color: Colors.grey),
+                          Icon(Icons.folder_off, size: 48, color: Colors.grey),
                           SizedBox(height: 16),
                           Text('No repositories found', style: TextStyle(color: Colors.grey)),
                           SizedBox(height: 8),
