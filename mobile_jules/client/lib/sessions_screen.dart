@@ -352,7 +352,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.inbox, size: 64, color: Colors.grey),
+                          Icon(Icons.inbox, size: 48, color: Colors.grey),
                           SizedBox(height: 16),
                           Text('No sessions yet',
                               style: TextStyle(color: Colors.grey)),
