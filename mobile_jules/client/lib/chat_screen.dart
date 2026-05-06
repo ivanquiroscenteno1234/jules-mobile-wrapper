@@ -993,7 +993,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         color: Colors.white,
                       ),
                     )
-                  : const Text('Create'),
+                  : Text(
+                      nameController.text.trim().isEmpty
+                          ? 'Enter name'
+                          : 'Create',
+                    ),
             ),
           ],
         ),
