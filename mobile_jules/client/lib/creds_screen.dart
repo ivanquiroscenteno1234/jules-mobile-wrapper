@@ -162,7 +162,15 @@ class _CredsScreenState extends State<CredsScreen> {
                         passwordController.text.isEmpty)
                     ? null
                     : () => Navigator.pop(context, true),
-                child: const Text('Save'),
+                child: Text(
+                  nameController.text.isEmpty
+                      ? 'Enter name'
+                      : usernameController.text.isEmpty
+                      ? 'Enter username'
+                      : passwordController.text.isEmpty
+                      ? 'Enter password'
+                      : 'Save',
+                ),
               ),
             ),
           ],
