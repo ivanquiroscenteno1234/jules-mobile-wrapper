@@ -5,6 +5,7 @@
 ## 2024-04-12 - Accessibility Enhancements
 **Learning:** ActionChips and FloatingActionButtons lacking text or with confusing labels need tooltips for better accessibility, just like IconButtons. The 'tooltip' property natively provides this functionality for both widgets.
 **Action:** Always include tooltip property for ActionChips and FloatingActionButtons.
+
 ## 2026-04-16 - [Dialog Validation Pattern]
 **Learning:** Silent failures in dialogs occur when submit buttons allow empty inputs. Users get confused when a dialog closes without saving.
 **Action:** Always disable submit buttons and provide visual cues when required fields are empty in Flutter dialogs.
@@ -12,3 +13,7 @@
 ## 2024-05-18 - Standardized Empty States
 **Learning:** This app requires a specific visual pattern for empty states to ensure visual consistency. Simply placing grey text like "No sessions yet" is not enough; it must be accompanied by an icon.
 **Action:** When adding or updating empty states, always use a `Center` containing a `Column` (with `mainAxisAlignment: MainAxisAlignment.center`) that stacks a relevant `Icon` (size 48-64, color `Colors.grey`), a `SizedBox` for spacing, and descriptive `Text` with `color: Colors.grey`.
+
+## 2024-05-20 - [Mobile Disabled Buttons]
+**Learning:** Tooltips on disabled buttons do not work well on mobile touch interfaces, making users confused about why a button is disabled.
+**Action:** Dynamically update the disabled button's text to explain why it is disabled (e.g., 'Fill all fields' instead of 'Save').
