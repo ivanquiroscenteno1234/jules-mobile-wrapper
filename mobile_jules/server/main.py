@@ -605,7 +605,8 @@ async def create_github_repo(request: CreateRepoRequest):
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 422:
             raise HTTPException(status_code=422, detail="Repository name already exists or is invalid")
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        print(f"GitHub API Error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="GitHub API request failed")
     except HTTPException:
         raise
     except Exception as e:
